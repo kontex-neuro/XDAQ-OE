@@ -20,35 +20,28 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-
-#ifndef __RECORDCONTROLLER_H_2C4CBD67__
-#define __RECORDCONTROLLER_H_2C4CBD67__
+#pragma once
 
 #include "DeviceThread.h"
+
 
 namespace RhythmNode
 {
 
-    /**
-        Communicates with the Intan RHD Recording Controller
+/**
+    Communicates with the KonteX XDAQ
 
-        https://intantech.com/recording_controller.html
+    https://kontex.io/pages/xdaq
 
-        @see DataThread, SourceNode
-        */
+    @see DataThread, SourceNode
+*/
 
-    class IntanRecordController : public DeviceThread
-    {
-    public:
+class XDAQSystem : public DeviceThread
+{
+public:
+    XDAQSystem(SourceNode *sn) : DeviceThread(sn, XDAQ) {}
 
-        /** Constructor */
-        IntanRecordController(SourceNode* sn) : DeviceThread(sn, RHD_RECORDING_CONTROLLER) { }
+    ~XDAQSystem() = default;
+};
 
-        /** Destructor */
-        ~IntanRecordController() { }
-    };
-}
-
-
-#endif
-
+}  // namespace RhythmNode

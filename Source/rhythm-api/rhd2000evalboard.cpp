@@ -1,11 +1,11 @@
 //----------------------------------------------------------------------------------
-// rhd2000evalboard.cpp
+// rhd2000evalboardusb3.cpp
 //
-// Intan Technoloies RHD2000 Rhythm Interface API
+// Intan Technoloies RHD2000 USB3 Rhythm Interface API
 // Rhd2000EvalBoard Class
-// Version 1.4 (26 February 2014)
+// Version 2.05 (24 July 2017)
 //
-// Copyright (c) 2013-2014 Intan Technologies LLC
+// Copyright (c) 2013-2017 Intan Technologies LLC
 //
 // This software is provided 'as-is', without any express or implied warranty.
 // In no event will the authors be held liable for any damages arising from the
@@ -17,345 +17,459 @@
 //
 // See http://www.intantech.com for documentation and product information.
 //----------------------------------------------------------------------------------
-#ifdef _WIN32
-#define NOMINMAX
-#endif
-#include <iostream>
-#include <iomanip>
-#include <fstream>
-#include <vector>
-#include <queue>
-#include <cmath>
 
 #include "rhd2000evalboard.h"
+
+#include <fmt/format.h>
+
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <mutex>
+#include <queue>
+#include <thread>
+#include <vector>
+
+
+// #include "mock_okCFrontPanel.h"
+#include "intan_chip.h"
+#include "okFrontPanelDLL.h"
 #include "rhd2000datablock.h"
 
-#include "okFrontPanelDLL.h"
+using namespace std;
+using std::vector;
 
-using namespace OpalKellyLegacy;
+#ifdef Q_OS_WIN
+#include <windows.h>  // for Sleep
+#endif
 
-// This class provides access to and control of the Opal Kelly XEM6010 USB/FPGA
-// interface board running the Rhythm interface Verilog code.
+// Opal Kelly module USB interface endpoint addresses
+enum OkEndPoint {
+    WireInResetRun = 0x00,
+    WireInMaxTimeStep = 0x01,
+    WireInSerialDigitalInCntl = 0x02,
+    WireInDataFreqPll = 0x03,
+    WireInMisoDelay = 0x04,
+    WireInCmdRamAddr = 0x05,
+    WireInCmdRamBank = 0x06,
+    WireInCmdRamData = 0x07,
+    WireInAuxCmdBank1 = 0x08,
+    WireInAuxCmdBank2 = 0x09,
+    WireInAuxCmdBank3 = 0x0a,
+    WireInAuxCmdLength = 0x0b,
+    WireInAuxCmdLoop = 0x0c,
+    WireInLedDisplay = 0x0d,
+    WireInDacReref = 0x0e,
+    // Note: room for extra WireIns here
+    WireInDataStreamEn = 0x14,
+    WireInTtlOut = 0x15,
+    WireInDacSource1 = 0x16,
+    WireInDacSource2 = 0x17,
+    WireInDacSource3 = 0x18,
+    WireInDacSource4 = 0x19,
+    WireInDacSource5 = 0x1a,
+    WireInDacSource6 = 0x1b,
+    WireInDacSource7 = 0x1c,
+    WireInDacSource8 = 0x1d,
+    WireInDacManual = 0x1e,
+    WireInMultiUse = 0x1f,
+
+    TrigInConfig = 0x40,
+    TrigInSpiStart = 0x41,
+    TrigInDacConfig = 0x42,
+
+    WireOutNumWords = 0x20,
+    WireOutSerialDigitalIn = 0x21,
+    WireOutSpiRunning = 0x22,
+    WireOutTtlIn = 0x23,
+    WireOutDataClkLocked = 0x24,
+    WireOutBoardMode = 0x25,
+    // Note: room for extra WireOuts here
+    WireOutBoardId = 0x3e,
+    WireOutBoardVersion = 0x3f,
+
+    PipeOutData = 0xa0,
+
+
+    // kontexdev
+    TrigVStim = 0x40,
+    WireInVStimMultiUse = 0x1f,
+    TrigMCU = 0x48,
+    WireOutXDAQStatus = 0x22,
+    // Write Serial Numbers b1=1 (default=0) 0x02, b0=1 (defualt = 0) -> FNEB_ReadB
+    WireInMCUControl = 0x02,
+    PipeInFirmware = 0x88,
+    PipeOutFirmware = 0xb0,
+    WireInSetMode = 0x00,
+    Enable32bitDIO = 0x12,
+    PipeInDAC1 = 0x90,
+    PipeInDAC2 = 0x91,
+    PipeInDAC3 = 0x92,
+    PipeInDAC4 = 0x93,
+    PipeInDAC5 = 0x94,
+    PipeInDAC6 = 0x95,
+    PipeInDAC7 = 0x96,
+    PipeInDAC8 = 0x97
+};
+
+constexpr int WireInAuxCmdBank[] = {OkEndPoint::WireInAuxCmdBank1, OkEndPoint::WireInAuxCmdBank2,
+                                    OkEndPoint::WireInAuxCmdBank3};
+
+constexpr int WireInDacSource[] = {OkEndPoint::WireInDacSource1, OkEndPoint::WireInDacSource2,
+                                   OkEndPoint::WireInDacSource3, OkEndPoint::WireInDacSource4,
+                                   OkEndPoint::WireInDacSource5, OkEndPoint::WireInDacSource6,
+                                   OkEndPoint::WireInDacSource7, OkEndPoint::WireInDacSource8};
+
+
+#ifdef UseMockOkFrontPanel
+#define okCFrontPanel MockOkCFrontPanel
+#endif
+
+template <bool update>
+void set_wire_in(okCFrontPanel *dev, int addr, uint32_t value, uint32_t mask = 0xFFFFFFFFu);
+
+template <>
+void set_wire_in<true>(okCFrontPanel *dev, int addr, uint32_t value, uint32_t mask)
+{
+    dev->SetWireInValue(addr, value, mask);
+    dev->UpdateWireIns();
+}
+
+template <>
+void set_wire_in<false>(okCFrontPanel *dev, int addr, uint32_t value, uint32_t mask)
+{
+    dev->SetWireInValue(addr, value, mask);
+}
+
+template <bool update>
+uint32_t get_wire_out(okCFrontPanel *dev, int addr);
+
+template <>
+uint32_t get_wire_out<true>(okCFrontPanel *dev, int addr)
+{
+    dev->UpdateWireOuts();
+    return dev->GetWireOutValue(addr);
+}
+
+template <>
+uint32_t get_wire_out<false>(okCFrontPanel *dev, int addr)
+{
+    return dev->GetWireOutValue(addr);
+}
+
+inline void send_trigger_in(okCFrontPanel *dev, int trig, int bit, int addr, uint32_t value,
+                            uint32_t mask = 0xFFFFFFFFu)
+{
+    set_wire_in<true>(dev, addr, value, mask);
+    dev->ActivateTriggerIn(trig, bit);
+}
+
+inline void send_trigger_in(okCFrontPanel *dev, int trig, int bit)
+{
+    dev->ActivateTriggerIn(trig, bit);
+}
+
+bool Rhd2000EvalBoard::UploadDACData(const vector<uint16_t> &commandList, int dacChannel,
+                                     int length)
+{
+    lock_guard<mutex> lockOk(okMutex);
+
+    const int words = commandList.size();
+    vector<uint8_t> dacBuffer(2 * words);
+    for (int i = 0; i < words; i++) {
+        dacBuffer[2 * i] = commandList[i] & 0xFF;
+        dacBuffer[2 * i + 1] = (commandList[i] & 0xFF00) >> 8;
+    }
+
+    dev->ActivateTriggerIn(0x41, 2);  // reset DAC write counter, set bit2 = 1
+    auto result = dev->WriteToBlockPipeIn(PipeInDAC1 + dacChannel, 16, 2 * words, &dacBuffer[0]);
+    if (result < 0) return false;
+
+    dev->SetWireInValue(0x1F, length - 1);  // set loop index
+    dev->UpdateWireIns();
+
+    dev->ActivateTriggerIn(0x41, 8 + dacChannel);  // latch DAC loop index channel 8 => 8+7
+    return true;
+}
+
+
+void Rhd2000EvalBoard::enable32bitDIO(bool enabled)
+{
+    lock_guard<mutex> lockOk(okMutex);
+    dev->SetWireInValue(Enable32bitDIO, enabled * 0x04, 0x04);
+    dev->UpdateWireIns();
+}
+
+
+Rhd2000EvalBoard::XDAQStatus Rhd2000EvalBoard::getXDAQStatus()
+{
+    dev->UpdateWireOuts();
+    auto value = dev->GetWireOutValue(WireOutXDAQStatus);
+    auto is_stat = [](auto v, XDAQStatus s) {
+        return (v & static_cast<uint8_t>(s)) == static_cast<uint8_t>(s);
+    };
+
+    if (is_stat(value, XDAQStatus::MCU_BUSY)) {
+        return XDAQStatus::MCU_BUSY;
+    } else if (is_stat(value, XDAQStatus::MCU_ERROR)) {
+        return XDAQStatus::MCU_ERROR;
+    } else if (is_stat(value, XDAQStatus::MCU_DONE)) {
+        return XDAQStatus::MCU_DONE;
+    } else if (value == 0) {
+        return XDAQStatus::MCU_IDLE;
+    }
+    return XDAQStatus::MCU_BUSY;
+}
+
 
 // Constructor.  Set sampling rate variable to 30.0 kS/s/channel (FPGA default).
 Rhd2000EvalBoard::Rhd2000EvalBoard()
+    : usbBuffer(MAX_NUM_BLOCKS * SAMPLES_PER_DATA_BLOCK *
+                max_sample_size<char, uint16_t>(MAX_NUM_DATA_STREAMS))
 {
-    int i;
-    sampleRate = SampleRate30000Hz; // Rhythm FPGA boots up with 30.0 kS/s/channel sampling rate
-    numDataStreams = 0;
-    dev = 0;
-    usb3 = false;
-
-    MAX_NUM_DATA_STREAMS = MAX_NUM_DATA_STREAMS_USB3;
-
-    for (i = 0; i < MAX_NUM_DATA_STREAMS; ++i) {
-        dataStreamEnabled[i] = 0;
-    }
-
-    cableDelay.resize(4, -1);
+    cout << "---- KonteX RhythmX USBC Controller v1.0 ----\n\n";
+    cout << "Rhd2000EvalBoard: Allocating " << usbBuffer.size() / 1.0e6
+         << " MBytes for USB buffer.\n";
+    cableDelay.resize(ports.num_of_spi);
+    chips.resize(ports.max_chips);
 }
 
-//Destructor: Deletes the device to avoid memory leak in Open ephys
 Rhd2000EvalBoard::~Rhd2000EvalBoard()
 {
-    if (dev != 0) delete dev;
+    if (is_open) {
+        std::array<int, 8> led = {0, 0, 0, 0, 0, 0, 0, 0};
+        setSpiLedDisplay(&led[0]);
+        resetFpga();
+    }
 }
 
-// Find an Opal Kelly XEM6010-LX45 board attached to a USB port and open it.
-// Returns 1 if successful, -1 if FrontPanel cannot be loaded, and -2 if XEM6010 can't be found.
-int Rhd2000EvalBoard::open(const char* libname)
+// Find an Opal Kelly XEM6310-LX45 board attached to a USB port and open it.
+// Returns 1 if successful, -1 if FrontPanel cannot be loaded, and -2 if XEM6310 can't be found.
+int Rhd2000EvalBoard::open(const char *libname)
 {
+    lock_guard<mutex> lockOk(okMutex);
     char dll_date[32], dll_time[32];
-    std::string serialNumber = "";
+    string serialNumber = "";
     int i, nDevices;
 
-    std::cout << "---- Intan Technologies ---- Rhythm RHD2000 Controller v1.41 ----" << std::endl << std::endl;
-//    if (okFrontPanelDLL_LoadLib(libname) == false) {
-//        std::cerr << "FrontPanel DLL could not be loaded.  " <<
-//                "Make sure this DLL is in the application start directory." << std::endl;
-//        return -1;
-//    }
-
+    if (okFrontPanelDLL_LoadLib(libname) == false) {
+        cerr << "FrontPanel DLL could not be loaded.  "
+             << "Make sure this DLL is in the application start directory." << endl;
+        return -1;
+    }
     okFrontPanelDLL_GetVersion(dll_date, dll_time);
-
-    std::cout << std::endl << "FrontPanel DLL loaded.  Built: " << dll_date << "  " << dll_time << std::endl;
-
+    cout << "FrontPanel DLL loaded.  Built: " << dll_date << "  " << dll_time << endl;
+#ifdef UseMockOkFrontPanel
+    dev = new MockOkCFrontPanel;
+#else
     dev = new okCFrontPanel;
+#endif
 
-    std::cout << std::endl << "Scanning USB for Opal Kelly devices..." << std::endl << std::endl;
-
-    nDevices = dev->GetDeviceCount(); // slow
-
-    std::cout << "Found " << nDevices << " Opal Kelly device" << ((nDevices == 1) ? "" : "s") <<
-            " connected:" << std::endl;
-
+    cout << endl << "Scanning USB for Opal Kelly devices..." << endl << endl;
+    nDevices = dev->GetDeviceCount();
+    cout << "Found " << nDevices << " Opal Kelly device" << ((nDevices == 1) ? "" : "s")
+         << " connected:" << endl;
     for (i = 0; i < nDevices; ++i) {
-        std::cout << "  Device #" << i + 1 << ": Opal Kelly " <<
-                opalKellyModelName(dev->GetDeviceListModel(i)).c_str() <<
-                " with serial number " << dev->GetDeviceListSerial(i).c_str() << std::endl;
+        cout << "  Device #" << i + 1 << ": Opal Kelly "
+             << opalKellyModelName(dev->GetDeviceListModel(i)).c_str() << " with serial number "
+             << dev->GetDeviceListSerial(i).c_str() << endl;
+    }
+    cout << endl;
+
+    // Find supported device in list of supported XEM boards.
+    for (i = 0; i < nDevices; ++i) {
+        if (dev->GetDeviceListModel(i) == OK_PRODUCT_XEM7310A75) {
+            serialNumber = dev->GetDeviceListSerial(i);
+            FPGA_board = OK_PRODUCT_XEM7310A75;
+            break;
+        }
+
+        else if (dev->GetDeviceListModel(i) == OK_PRODUCT_XEM6010LX45) {
+            serialNumber = dev->GetDeviceListSerial(i);
+            FPGA_board = OK_PRODUCT_XEM6010LX45;
+            usb3 = false;
+            break;
+        }
+
+        else if (dev->GetDeviceListModel(i) == OK_PRODUCT_XEM6310LX45) {
+            serialNumber = dev->GetDeviceListSerial(i);
+            FPGA_board = OK_PRODUCT_XEM6310LX45;
+            usb3 = true;
+            break;
+        }
+    }
+    if (serialNumber == "") {
+        cerr << "No Opal Kelly board found." << endl;
+        return -2;
     }
 
-    std::cout << std::endl;
+    cout << "Attempting to connect to device '" << serialNumber.c_str() << "'\n";
 
-	for (i = 0; i < nDevices; ++i)
-	{
-        okCFrontPanel::BoardModel model = dev->GetDeviceListModel(i);
-
-        if (model == OK_PRODUCT_XEM6010LX45 || model == OK_PRODUCT_XEM6310LX45) //the two models we use
-		{
-			serialNumber = serialNumber = dev->GetDeviceListSerial(i);
-
-            std::cout << "Trying to open device with serial " << serialNumber.c_str() << std::endl;
-
-            if (dev->OpenBySerial(serialNumber) == okCFrontPanel::NoError) //
-			{
-				std::cout << "Device opened" << std::endl;
-				if (model == OK_PRODUCT_XEM6310LX45)
-					usb3 = true;
-				break; //end loop if one device was opened
-			}
-		}
-	}
-	if (!dev->IsOpen())
-	{
-		delete dev;
-        dev = 0;
-        usb3 = false;
-		std::cerr << "No device could be opened.  Is one connected?" << std::endl;
-		return -2;
-	}
-
-    MAX_NUM_DATA_STREAMS = usb3 ? MAX_NUM_DATA_STREAMS_USB3 : MAX_NUM_DATA_STREAMS_USB2;
-
-    // Configure the on-board PLL appropriately.
-    dev->LoadDefaultPLLConfiguration();
+    okCFrontPanel::ErrorCode result = dev->OpenBySerial(serialNumber);
+    // Attempt to open device.
+    if (result != okCFrontPanel::NoError) {
+        delete dev;
+        cerr << "Device could not be opened.  Is one connected?" << endl;
+        cerr << "Error = " << result << endl;
+        return -2;
+    }
 
     // Get some general information about the XEM.
-    std::cout << "FPGA system clock: " << getSystemClockFreq() << " MHz" << std::endl; // Should indicate 100 MHz
-    std::cout << "Opal Kelly device firmware version: " << dev->GetDeviceMajorVersion() << "." <<
-            dev->GetDeviceMinorVersion() << std::endl;
-    std::cout << "Opal Kelly device serial number: " << dev->GetSerialNumber().c_str() << std::endl;
-    std::cout << "Opal Kelly device ID std::string: " << dev->GetDeviceID().c_str() << std::endl << std::endl;
+    cout << "Opal Kelly device firmware version: " << dev->GetDeviceMajorVersion() << "."
+         << dev->GetDeviceMinorVersion() << endl;
+    cout << "Opal Kelly device serial number: " << dev->GetSerialNumber().c_str() << endl;
+    cout << "Opal Kelly device ID string: " << dev->GetDeviceID().c_str() << endl << endl;
 
     return 1;
 }
 
 // Uploads the configuration file (bitfile) to the FPGA.  Returns true if successful.
-bool Rhd2000EvalBoard::uploadFpgaBitfile(std::string filename)
+bool Rhd2000EvalBoard::uploadFpgaBitfile(string filename)
 {
+    lock_guard<mutex> lockOk(okMutex);
     okCFrontPanel::ErrorCode errorCode = dev->ConfigureFPGA(filename);
 
     switch (errorCode) {
-        case okCFrontPanel::NoError:
-            break;
-        case okCFrontPanel::DeviceNotOpen:
-            std::cerr << "FPGA configuration failed: Device not open." << std::endl;
-            return(false);
-        case okCFrontPanel::FileError:
-            std::cerr << "FPGA configuration failed: Cannot find configuration file." << std::endl;
-            return(false);
-        case okCFrontPanel::InvalidBitstream:
-            std::cerr << "FPGA configuration failed: Bitstream is not properly formatted." << std::endl;
-            return(false);
-        case okCFrontPanel::DoneNotHigh:
-            std::cerr << "FPGA configuration failed: FPGA DONE signal did not assert after configuration." << std::endl;
-            return(false);
-        case okCFrontPanel::TransferError:
-            std::cerr << "FPGA configuration failed: USB error occurred during download." << std::endl;
-            return(false);
-        case okCFrontPanel::CommunicationError:
-            std::cerr << "FPGA configuration failed: Communication error with firmware." << std::endl;
-            return(false);
-        case okCFrontPanel::UnsupportedFeature:
-            std::cerr << "FPGA configuration failed: Unsupported feature." << std::endl;
-            return(false);
-        default:
-            std::cerr << "FPGA configuration failed: Unknown error." << std::endl;
-            return(false);
+    case okCFrontPanel::NoError: break;
+    case okCFrontPanel::DeviceNotOpen:
+        cerr << "FPGA configuration failed: Device not open." << endl;
+        return (false);
+    case okCFrontPanel::FileError:
+        cerr << "FPGA configuration failed: Cannot find configuration file." << endl;
+        return (false);
+    case okCFrontPanel::InvalidBitstream:
+        cerr << "FPGA configuration failed: Bitstream is not properly formatted." << endl;
+        return (false);
+    case okCFrontPanel::DoneNotHigh:
+        cerr << "FPGA configuration failed: FPGA DONE signal did not assert after configuration."
+             << endl;
+        return (false);
+    case okCFrontPanel::TransferError:
+        cerr << "FPGA configuration failed: USB error occurred during download." << endl;
+        return (false);
+    case okCFrontPanel::CommunicationError:
+        cerr << "FPGA configuration failed: Communication error with firmware." << endl;
+        return (false);
+    case okCFrontPanel::UnsupportedFeature:
+        cerr << "FPGA configuration failed: Unsupported feature." << endl;
+        return (false);
+    default: cerr << "FPGA configuration failed: Unknown error." << endl; return (false);
     }
 
     // Check for Opal Kelly FrontPanel support in the FPGA configuration.
     if (dev->IsFrontPanelEnabled() == false) {
-        std::cerr << "Opal Kelly FrontPanel support is not enabled in this FPGA configuration." << std::endl;
+        cerr << "Opal Kelly FrontPanel support is not enabled in this FPGA configuration." << endl;
         delete dev;
-        dev = 0;
-        return(false);
+        return (false);
     }
 
-    int boardId, boardVersion;
     dev->UpdateWireOuts();
-    boardId = dev->GetWireOutValue(WireOutBoardId);
-    boardVersion = dev->GetWireOutValue(WireOutBoardVersion);
+    int boardId = dev->GetWireOutValue(WireOutBoardId);
+    int boardVersion = dev->GetWireOutValue(WireOutBoardVersion);
 
-    if (boardId != (usb3 ? RHYTHM_BOARD_ID_USB3 : RHYTHM_BOARD_ID_USB2)) {
-        std::cerr << "FPGA configuration does not support Rhythm.  Incorrect board ID: " << boardId << std::endl;
-        return(false);
-    } else {
-        std::cout << "Rhythm configuration file successfully loaded.  Rhythm version number: " <<
-                boardVersion << std::endl << std::endl;
+    while (getXDAQStatus() != XDAQStatus::MCU_IDLE)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    dev->UpdateWireOuts();
+    expander = (dev->GetWireOutValue(0x35) != 0);
+    // int expanderBoardIdNumber = ((dev->GetWireOutValue(WireOutSerialDigitalIn) & 0x08) ? 1 : 0);
+
+    /*
+    if (boardId != RHYTHM_BOARD_ID) {
+        cerr << "FPGA configuration file does not support Rhythm USB3.  Incorrect board ID: " <<
+    boardId << endl; return(false); } else { cout << "Rhythm USB3 configuration file successfully
+    loaded." << endl << endl;
     }
-
-    return(true);
-}
-
-// Reads system clock frequency from Opal Kelly board (in MHz).  Should be 100 MHz for normal
-// Rhythm operation.
-double Rhd2000EvalBoard::getSystemClockFreq() const
-{
-    // Read back the CY22393 PLL configuation
-    okCPLL22393 pll;
-    dev->GetEepromPLL22393Configuration(pll);
-
-    return pll.GetOutputFrequency(0);
+    */
+    is_open = true;
+    return true;
 }
 
 // Initialize Rhythm FPGA to default starting values.
 void Rhd2000EvalBoard::initialize()
 {
-    int i;
-
     resetBoard();
-    setSampleRate(SampleRate30000Hz);
-    selectAuxCommandBank(PortA, AuxCmd1, 0);
-    selectAuxCommandBank(PortB, AuxCmd1, 0);
-    selectAuxCommandBank(PortC, AuxCmd1, 0);
-    selectAuxCommandBank(PortD, AuxCmd1, 0);
-    selectAuxCommandBank(PortA, AuxCmd2, 0);
-    selectAuxCommandBank(PortB, AuxCmd2, 0);
-    selectAuxCommandBank(PortC, AuxCmd2, 0);
-    selectAuxCommandBank(PortD, AuxCmd2, 0);
-    selectAuxCommandBank(PortA, AuxCmd3, 0);
-    selectAuxCommandBank(PortB, AuxCmd3, 0);
-    selectAuxCommandBank(PortC, AuxCmd3, 0);
-    selectAuxCommandBank(PortD, AuxCmd3, 0);
-    selectAuxCommandLength(AuxCmd1, 0, 0);
-    selectAuxCommandLength(AuxCmd2, 0, 0);
-    selectAuxCommandLength(AuxCmd3, 0, 0);
+    setSampleRate(SampleRate::s30000Hz);
+    selectAuxCommandBank(SPIPort::All, AuxCmdSlot::All, 0);
+    selectAuxCommandLength(AuxCmdSlot::All, 0, 0);
+
     setContinuousRunMode(true);
     setMaxTimeStep(4294967295);  // 4294967295 == (2^32 - 1)
 
-    setCableLengthFeet(PortA, 3.0);  // assume 3 ft cables
-    setCableLengthFeet(PortB, 3.0);
-    setCableLengthFeet(PortC, 3.0);
-    setCableLengthFeet(PortD, 3.0);
+    setCableLengthFeet(SPIPort::All, 3.0);  // assume 3 ft cables
 
     setDspSettle(false);
 
-    setDataSource(0, PortA1);
-    setDataSource(1, PortB1);
-    setDataSource(2, PortC1);
-    setDataSource(3, PortD1);
-    setDataSource(4, PortA2);
-    setDataSource(5, PortB2);
-    setDataSource(6, PortC2);
-    setDataSource(7, PortD2);
+    // Must first force all data streams off
+    set_wire_in<true>(dev, WireInDataStreamEn, 0);
 
-    if (usb3)
-    {
-        setDataSource(8, PortA1);
-        setDataSource(9, PortB1);
-        setDataSource(10, PortC1);
-        setDataSource(11, PortD1);
-        setDataSource(12, PortA2);
-        setDataSource(13, PortB2);
-        setDataSource(14, PortC2);
-        setDataSource(15, PortD2);
-    }
-
-    enableDataStream(0, true);        // start with only one data stream enabled
-    for (i = 1; i < MAX_NUM_DATA_STREAMS; i++) {
+    enableDataStream(0, true);  // start with only one data stream enabled
+    for (int i = 1; i < MAX_NUM_DATA_STREAMS; i++) {
         enableDataStream(i, false);
     }
 
     clearTtlOut();
 
-    enableDac(0, false);
-    enableDac(1, false);
-    enableDac(2, false);
-    enableDac(3, false);
-    enableDac(4, false);
-    enableDac(5, false);
-    enableDac(6, false);
-    enableDac(7, false);
-    selectDacDataStream(0, 0);
-    selectDacDataStream(1, 0);
-    selectDacDataStream(2, 0);
-    selectDacDataStream(3, 0);
-    selectDacDataStream(4, 0);
-    selectDacDataStream(5, 0);
-    selectDacDataStream(6, 0);
-    selectDacDataStream(7, 0);
-    selectDacDataChannel(0, 0);
-    selectDacDataChannel(1, 0);
-    selectDacDataChannel(2, 0);
-    selectDacDataChannel(3, 0);
-    selectDacDataChannel(4, 0);
-    selectDacDataChannel(5, 0);
-    selectDacDataChannel(6, 0);
-    selectDacDataChannel(7, 0);
+    for (int i = 0; i < ports.num_of_dac; ++i) {
+        config_dac(i, false, ports.max_streams, 0);
+    }
 
-    setDacManual(32768);    // midrange value = 0 V
-
+    setDacManual(32768);  // midrange value = 0 V
     setDacGain(0);
     setAudioNoiseSuppress(0);
 
-    setTtlMode(1);          // Digital outputs 0-7 are DAC comparators; 8-15 under manual control
+    for (int i = 0; i < ports.num_of_dac; ++i) setDacThreshold(i, 32768, true);
 
-    setDacThreshold(0, 32768, true);
-    setDacThreshold(1, 32768, true);
-    setDacThreshold(2, 32768, true);
-    setDacThreshold(3, 32768, true);
-    setDacThreshold(4, 32768, true);
-    setDacThreshold(5, 32768, true);
-    setDacThreshold(6, 32768, true);
-    setDacThreshold(7, 32768, true);
+    setTtlMode(1);  // Digital outputs 0-7 are DAC comparators; 8-15 under manual control
 
     enableExternalFastSettle(false);
     setExternalFastSettleChannel(0);
 
-    enableExternalDigOut(PortA, false);
-    enableExternalDigOut(PortB, false);
-    enableExternalDigOut(PortC, false);
-    enableExternalDigOut(PortD, false);
-    setExternalDigOutChannel(PortA, 0);
-    setExternalDigOutChannel(PortB, 0);
-    setExternalDigOutChannel(PortC, 0);
-    setExternalDigOutChannel(PortD, 0);
+    enableExternalDigOut(SPIPort::All, false);
+    setExternalDigOutChannel(SPIPort::All, 0);
 
-    enableBoardLeds(true);
+    enableDacReref(false);
 }
 
 // Set the per-channel sampling rate of the RHD2000 chips connected to the FPGA.
-bool Rhd2000EvalBoard::setSampleRate(AmplifierSampleRate newSampleRate)
+bool Rhd2000EvalBoard::setSampleRate(SampleRate newSampleRate)
 {
-    // Assuming a 100 MHz reference clock is provided to the FPGA, the programmable FPGA clock frequency
-    // is given by:
+    lock_guard<mutex> lockOk(okMutex);
+
+    // Assuming a 100 MHz reference clock is provided to the FPGA, the programmable FPGA clock
+    // frequency is given by:
     //
     //       FPGA internal clock frequency = 100 MHz * (M/D) / 2
     //
-    // M and D are "multiply" and "divide" integers used in the FPGA's digital clock manager (DCM) phase-
-    // locked loop (PLL) frequency synthesizer, and are subject to the following restrictions:
+    // M and D are "multiply" and "divide" integers used in the FPGA's digital clock manager (DCM)
+    // phase- locked loop (PLL) frequency synthesizer, and are subject to the following
+    // restrictions:
     //
     //                M must have a value in the range of 2 - 256
     //                D must have a value in the range of 1 - 256
     //                M/D must fall in the range of 0.05 - 3.33
     //
-    // (See pages 85-86 of Xilinx document UG382 "Spartan-6 FPGA Clocking Resources" for more details.)
+    // (See pages 85-86 of Xilinx document UG382 "Spartan-6 FPGA Clocking Resources" for more
+    // details.)
     //
     // This variable-frequency clock drives the state machine that controls all SPI communication
     // with the RHD2000 chips.  A complete SPI cycle (consisting of one CS pulse and 16 SCLK pulses)
     // takes 80 clock cycles.  The SCLK period is 4 clock cycles; the CS pulse is high for 14 clock
     // cycles between commands.
     //
-    // Rhythm samples all 32 channels and then executes 3 "auxiliary" commands that can be used to read
-    // and write from other registers on the chip, or to sample from the temperature sensor or auxiliary ADC
-    // inputs, for example.  Therefore, a complete cycle that samples from each amplifier channel takes
-    // 80 * (32 + 3) = 80 * 35 = 2800 clock cycles.
+    // Rhythm samples all 32 channels and then executes 3 "auxiliary" commands that can be used to
+    // read and write from other registers on the chip, or to sample from the temperature sensor or
+    // auxiliary ADC inputs, for example.  Therefore, a complete cycle that samples from each
+    // amplifier channel takes 80 * (32 + 3) = 80 * 35 = 2800 clock cycles.
     //
-    // So the per-channel sampling rate of each amplifier is 2800 times slower than the clock frequency.
+    // So the per-channel sampling rate of each amplifier is 2800 times slower than the clock
+    // frequency.
     //
-    // Based on these design choices, we can use the following values of M and D to generate the following
-    // useful amplifier sampling rates for electrophsyiological applications:
+    // Based on these design choices, we can use the following values of M and D to generate the
+    // following useful amplifier sampling rates for electrophsyiological applications:
     //
     //   M    D     clkout frequency    per-channel sample rate     per-channel sample period
     //  ---  ---    ----------------    -----------------------     -------------------------
@@ -377,342 +491,238 @@ bool Rhd2000EvalBoard::setSampleRate(AmplifierSampleRate newSampleRate)
     //   35   25         70.00 MHz              25.00 kS/s                   40.0 usec
     //   42   25         84.00 MHz              30.00 kS/s                   33.3 usec
     //
-    // To set a new clock frequency, assert new values for M and D (e.g., using okWireIn modules) and
-    // pulse DCM_prog_trigger high (e.g., using an okTriggerIn module).  If this module is reset, it
-    // reverts to a per-channel sampling rate of 30.0 kS/s.
+    // To set a new clock frequency, assert new values for M and D (e.g., using okWireIn modules)
+    // and pulse DCM_prog_trigger high (e.g., using an okTriggerIn module).  If this module is
+    // reset, it reverts to a per-channel sampling rate of 30.0 kS/s.
 
     unsigned long M, D;
 
     switch (newSampleRate) {
-    case SampleRate1000Hz:
+    case SampleRate::s1000Hz:
         M = 7;
         D = 125;
         break;
-    case SampleRate1250Hz:
+    case SampleRate::s1250Hz:
         M = 7;
         D = 100;
         break;
-    case SampleRate1500Hz:
+    case SampleRate::s1500Hz:
         M = 21;
         D = 250;
         break;
-    case SampleRate2000Hz:
+    case SampleRate::s2000Hz:
         M = 14;
         D = 125;
         break;
-    case SampleRate2500Hz:
+    case SampleRate::s2500Hz:
         M = 35;
         D = 250;
         break;
-    case SampleRate3000Hz:
+    case SampleRate::s3000Hz:
         M = 21;
         D = 125;
         break;
-    case SampleRate3333Hz:
+    case SampleRate::s3333Hz:
         M = 14;
         D = 75;
         break;
-    case SampleRate4000Hz:
+    case SampleRate::s4000Hz:
         M = 28;
         D = 125;
         break;
-    case SampleRate5000Hz:
+    case SampleRate::s5000Hz:
         M = 7;
         D = 25;
         break;
-    case SampleRate6250Hz:
+    case SampleRate::s6250Hz:
         M = 7;
         D = 20;
         break;
-    case SampleRate8000Hz:
+    case SampleRate::s8000Hz:
         M = 112;
         D = 250;
         break;
-    case SampleRate10000Hz:
+    case SampleRate::s10000Hz:
         M = 14;
         D = 25;
         break;
-    case SampleRate12500Hz:
+    case SampleRate::s12500Hz:
         M = 7;
         D = 10;
         break;
-    case SampleRate15000Hz:
+    case SampleRate::s15000Hz:
         M = 21;
         D = 25;
         break;
-    case SampleRate20000Hz:
+    case SampleRate::s20000Hz:
         M = 28;
         D = 25;
         break;
-    case SampleRate25000Hz:
+    case SampleRate::s25000Hz:
         M = 35;
         D = 25;
         break;
-    case SampleRate30000Hz:
+    case SampleRate::s30000Hz:
         M = 42;
         D = 25;
         break;
-    default:
-        return(false);
+    default: return (false);
     }
 
     sampleRate = newSampleRate;
 
     // Wait for DcmProgDone = 1 before reprogramming clock synthesizer
-    while (isDcmProgDone() == false) {}
+    while (isDcmProgDone() == false)
+        ;
 
     // Reprogram clock synthesizer
-    dev->SetWireInValue(WireInDataFreqPll, (256 * M + D));
-    dev->UpdateWireIns();
-    dev->ActivateTriggerIn(TrigInDcmProg, 0);
+    send_trigger_in(dev, TrigInConfig, 0, WireInDataFreqPll, (256 * M + D));
 
     // Wait for DataClkLocked = 1 before allowing data acquisition to continue
-    while (isDataClockLocked() == false) {}
+    while (isDataClockLocked() == false)
+        ;
 
-    return(true);
+    return true;
 }
 
 // Returns the current per-channel sampling rate (in Hz) as a floating-point number.
 double Rhd2000EvalBoard::getSampleRate() const
 {
     switch (sampleRate) {
-    case SampleRate1000Hz:
-        return 1000.0;
-        break;
-    case SampleRate1250Hz:
-        return 1250.0;
-        break;
-    case SampleRate1500Hz:
-        return 1500.0;
-        break;
-    case SampleRate2000Hz:
-        return 2000.0;
-        break;
-    case SampleRate2500Hz:
-        return 2500.0;
-        break;
-    case SampleRate3000Hz:
-        return 3000.0;
-        break;
-    case SampleRate3333Hz:
-        return (10000.0 / 3.0);
-        break;
-    case SampleRate4000Hz:
-        return 4000.0;
-        break;
-    case SampleRate5000Hz:
-        return 5000.0;
-        break;
-    case SampleRate6250Hz:
-        return 6250.0;
-        break;
-    case SampleRate8000Hz:
-        return 8000.0;
-        break;
-    case SampleRate10000Hz:
-        return 10000.0;
-        break;
-    case SampleRate12500Hz:
-        return 12500.0;
-        break;
-    case SampleRate15000Hz:
-        return 15000.0;
-        break;
-    case SampleRate20000Hz:
-        return 20000.0;
-        break;
-    case SampleRate25000Hz:
-        return 25000.0;
-        break;
-    case SampleRate30000Hz:
-        return 30000.0;
-        break;
-    default:
-        return -1.0;
+    case SampleRate::s1000Hz: return 1000.0; break;
+    case SampleRate::s1250Hz: return 1250.0; break;
+    case SampleRate::s1500Hz: return 1500.0; break;
+    case SampleRate::s2000Hz: return 2000.0; break;
+    case SampleRate::s2500Hz: return 2500.0; break;
+    case SampleRate::s3000Hz: return 3000.0; break;
+    case SampleRate::s3333Hz: return (10000.0 / 3.0); break;
+    case SampleRate::s4000Hz: return 4000.0; break;
+    case SampleRate::s5000Hz: return 5000.0; break;
+    case SampleRate::s6250Hz: return 6250.0; break;
+    case SampleRate::s8000Hz: return 8000.0; break;
+    case SampleRate::s10000Hz: return 10000.0; break;
+    case SampleRate::s12500Hz: return 12500.0; break;
+    case SampleRate::s15000Hz: return 15000.0; break;
+    case SampleRate::s20000Hz: return 20000.0; break;
+    case SampleRate::s25000Hz: return 25000.0; break;
+    case SampleRate::s30000Hz: return 30000.0; break;
+    default: return -1.0;
     }
 }
 
-Rhd2000EvalBoard::AmplifierSampleRate Rhd2000EvalBoard::getSampleRateEnum() const
+Rhd2000EvalBoard::SampleRate Rhd2000EvalBoard::getSampleRateEnum() const { return sampleRate; }
+
+// Upload an auxiliary command list to a particular command slot (AuxCmd1, AuxCmd2, or AuxCmd3) and
+// RAM bank (0-15) on the FPGA.
+void Rhd2000EvalBoard::uploadCommandList(const std::vector<uint32_t> &commandList,
+                                         AuxCmdSlot auxCommandSlot, int bank)
 {
-    return sampleRate;
-}
-
-// Print a command list to the console in readable form.
-void Rhd2000EvalBoard::printCommandList(const std::vector<int> &commandList) const
-{
-    unsigned int i;
-    int cmd, channel, reg, data;
-
-    std::cout << std::endl;
-    for (i = 0; i < commandList.size(); ++i) {
-        cmd = commandList[i];
-        if (cmd < 0 || cmd > 0xffff) {
-            std::cout << "  command[" << i << "] = INVALID COMMAND: " << cmd << std::endl;
-        } else if ((cmd & 0xc000) == 0x0000) {
-            channel = (cmd & 0x3f00) >> 8;
-            std::cout << "  command[" << i << "] = CONVERT(" << channel << ")" << std::endl;
-        } else if ((cmd & 0xc000) == 0xc000) {
-            reg = (cmd & 0x3f00) >> 8;
-            std::cout << "  command[" << i << "] = READ(" << reg << ")" << std::endl;
-        } else if ((cmd & 0xc000) == 0x8000) {
-            reg = (cmd & 0x3f00) >> 8;
-            data = (cmd & 0x00ff);
-            std::cout << "  command[" << i << "] = WRITE(" << reg << ",";
-            std::cout << std::hex << std::uppercase << std::internal << std::setfill('0') << std::setw(2) << data << std::nouppercase << std::dec;
-            std::cout << ")" << std::endl;
-        } else if (cmd == 0x5500) {
-            std::cout << "  command[" << i << "] = CALIBRATE" << std::endl;
-        } else if (cmd == 0x6a00) {
-            std::cout << "  command[" << i << "] = CLEAR" << std::endl;
-        } else {
-            std::cout << "  command[" << i << "] = INVALID COMMAND: ";
-            std::cout << std::hex << std::uppercase << std::internal << std::setfill('0') << std::setw(4) << cmd << std::nouppercase << std::dec;
-            std::cout << std::endl;
-        }
-    }
-    std::cout << std::endl;
-}
-
-// Upload an auxiliary command list to a particular command slot (AuxCmd1, AuxCmd2, or AuxCmd3) and RAM bank (0-15)
-// on the FPGA.
-void Rhd2000EvalBoard::uploadCommandList(const std::vector<int> &commandList, AuxCmdSlot auxCommandSlot, int bank)
-{
-    unsigned int i;
-
-    if (auxCommandSlot != AuxCmd1 && auxCommandSlot != AuxCmd2 && auxCommandSlot != AuxCmd3) {
-        std::cerr << "Error in Rhd2000EvalBoard::uploadCommandList: auxCommandSlot out of range." << std::endl;
+    lock_guard<mutex> lockOk(okMutex);
+    if (auxCommandSlot == AuxCmdSlot::All) {
+        cerr << "Error in Rhd2000EvalBoard::uploadCommandList: auxCommandSlot cannot be All.\n";
         return;
     }
 
     if (bank < 0 || bank > 15) {
-        std::cerr << "Error in Rhd2000EvalBoard::uploadCommandList: bank out of range." << std::endl;
+        cerr << "Error in Rhd2000EvalBoard::uploadCommandList: bank out of range.\n";
         return;
     }
 
-    for (i = 0; i < commandList.size(); ++i) {
-        dev->SetWireInValue(WireInCmdRamData, commandList[i]);
-        dev->SetWireInValue(WireInCmdRamAddr, i);
-        dev->SetWireInValue(WireInCmdRamBank, bank);
-        dev->UpdateWireIns();
-        switch (auxCommandSlot) {
-            case AuxCmd1:
-                dev->ActivateTriggerIn(TrigInRamWrite, 0);
-                break;
-            case AuxCmd2:
-                dev->ActivateTriggerIn(TrigInRamWrite, 1);
-                break;
-            case AuxCmd3:
-                dev->ActivateTriggerIn(TrigInRamWrite, 2);
-                break;
-        }
+    set_wire_in<false>(dev, WireInCmdRamBank, bank);
+    const auto aux = static_cast<int>(auxCommandSlot);
+    for (size_t i = 0; i < commandList.size(); ++i) {
+        set_wire_in<false>(dev, WireInCmdRamData, commandList[i]);
+        send_trigger_in(dev, TrigInConfig, aux + 1, WireInCmdRamAddr, i);
     }
 }
 
-// Select an auxiliary command slot (AuxCmd1, AuxCmd2, or AuxCmd3) and bank (0-15) for a particular SPI port
-// (PortA, PortB, PortC, or PortD) on the FPGA.
-void Rhd2000EvalBoard::selectAuxCommandBank(BoardPort port, AuxCmdSlot auxCommandSlot, int bank)
+// Select an auxiliary command slot (AuxCmd1, AuxCmd2, or AuxCmd3) and bank (0-15) for a particular
+// SPI port (PortA - PortH) on the FPGA.
+void Rhd2000EvalBoard::selectAuxCommandBank(SPIPort port, AuxCmdSlot auxCommandSlot, int bank)
 {
-    int bitShift;
-
-    if (auxCommandSlot != AuxCmd1 && auxCommandSlot != AuxCmd2 && auxCommandSlot != AuxCmd3) {
-        std::cerr << "Error in Rhd2000EvalBoard::selectAuxCommandBank: auxCommandSlot out of range." << std::endl;
-        return;
-    }
+    lock_guard<mutex> lockOk(okMutex);
     if (bank < 0 || bank > 15) {
-        std::cerr << "Error in Rhd2000EvalBoard::selectAuxCommandBank: bank out of range." << std::endl;
+        cerr << "Error in Rhd2000EvalBoard::selectAuxCommandBank: bank out of range." << endl;
         return;
     }
 
-    switch (port) {
-    case PortA:
-        bitShift = 0;
-        break;
-    case PortB:
-        bitShift = 4;
-        break;
-    case PortC:
-        bitShift = 8;
-        break;
-    case PortD:
-        bitShift = 12;
-        break;
+    uint32_t value, mask;
+    if (port == SPIPort::All) {
+        value = bank | (bank << 4);
+        value |= value << 8;
+        value |= value << 16;
+        mask = 0xffffffff;
+    } else {
+        value = bank << static_cast<int>(port) * 4;
+        mask = 0xf << static_cast<int>(port) * 4;
     }
-
-    switch (auxCommandSlot) {
-    case AuxCmd1:
-        dev->SetWireInValue(WireInAuxCmdBank1, bank << bitShift, 0x000f << bitShift);
-        break;
-    case AuxCmd2:
-        dev->SetWireInValue(WireInAuxCmdBank2, bank << bitShift, 0x000f << bitShift);
-        break;
-    case AuxCmd3:
-        dev->SetWireInValue(WireInAuxCmdBank3, bank << bitShift, 0x000f << bitShift);
-        break;
+    if (auxCommandSlot == AuxCmdSlot::All) {
+        for (int i = 0; i < 3; ++i) set_wire_in<true>(dev, WireInAuxCmdBank[i], value, mask);
+    } else {
+        set_wire_in<true>(dev, WireInAuxCmdBank[static_cast<int>(auxCommandSlot)], value, mask);
     }
-    dev->UpdateWireIns();
 }
 
-// Specify a command sequence length (endIndex = 0-1023) and command loop index (0-1023) for a particular
-// auxiliary command slot (AuxCmd1, AuxCmd2, or AuxCmd3).
-void Rhd2000EvalBoard::selectAuxCommandLength(AuxCmdSlot auxCommandSlot, int loopIndex, int endIndex)
+// Specify a command sequence length (endIndex = 0-1023) and command loop index (0-1023) for a
+// particular auxiliary command slot (AuxCmd1, AuxCmd2, or AuxCmd3).
+void Rhd2000EvalBoard::selectAuxCommandLength(AuxCmdSlot auxCommandSlot, int loopIndex,
+                                              int endIndex)
 {
-    if (auxCommandSlot != AuxCmd1 && auxCommandSlot != AuxCmd2 && auxCommandSlot != AuxCmd3) {
-        std::cerr << "Error in Rhd2000EvalBoard::selectAuxCommandLength: auxCommandSlot out of range." << std::endl;
-        return;
-    }
+    lock_guard<mutex> lockOk(okMutex);
 
     if (loopIndex < 0 || loopIndex > 1023) {
-        std::cerr << "Error in Rhd2000EvalBoard::selectAuxCommandLength: loopIndex out of range." << std::endl;
+        cerr << "Error in Rhd2000EvalBoard::selectAuxCommandLength: loopIndex out of range.\n";
         return;
     }
 
     if (endIndex < 0 || endIndex > 1023) {
-        std::cerr << "Error in Rhd2000EvalBoard::selectAuxCommandLength: endIndex out of range." << std::endl;
+        cerr << "Error in Rhd2000EvalBoard::selectAuxCommandLength: endIndex out of range.\n";
         return;
     }
 
-    switch (auxCommandSlot) {
-    case AuxCmd1:
-        dev->SetWireInValue(WireInAuxCmdLoop1, loopIndex);
-        dev->SetWireInValue(WireInAuxCmdLength1, endIndex);
-        break;
-    case AuxCmd2:
-        dev->SetWireInValue(WireInAuxCmdLoop2, loopIndex);
-        dev->SetWireInValue(WireInAuxCmdLength2, endIndex);
-        break;
-    case AuxCmd3:
-        dev->SetWireInValue(WireInAuxCmdLoop3, loopIndex);
-        dev->SetWireInValue(WireInAuxCmdLength3, endIndex);
-        break;
+    if (auxCommandSlot == AuxCmdSlot::All) {
+        set_wire_in<false>(dev, WireInAuxCmdLoop,
+                           loopIndex | (loopIndex << 10) | (loopIndex << 20));
+        set_wire_in<true>(dev, WireInAuxCmdLength, endIndex | (endIndex << 10) | (endIndex << 20));
+    } else {
+        const auto aux = static_cast<int>(auxCommandSlot);
+        set_wire_in<false>(dev, WireInAuxCmdLoop, loopIndex << aux * 10, 0x3ff << aux * 10);
+        set_wire_in<true>(dev, WireInAuxCmdLength, endIndex << aux * 10, 0x3ff << aux * 10);
     }
-    dev->UpdateWireIns();
 }
 
 // Reset FPGA.  This clears all auxiliary command RAM banks, clears the USB FIFO, and resets the
 // per-channel sampling rate to 30.0 kS/s/ch.
 void Rhd2000EvalBoard::resetBoard()
 {
+    lock_guard<mutex> lockOk(okMutex);
+
     dev->SetWireInValue(WireInResetRun, 0x01, 0x01);
     dev->UpdateWireIns();
     dev->SetWireInValue(WireInResetRun, 0x00, 0x01);
     dev->UpdateWireIns();
-    if (usb3)
-    {
-        dev->SetWireInValue(WireInMultiUse, USB3_BLOCK_SIZE / 4);
-        dev->UpdateWireIns();
-        dev->ActivateTriggerIn(TrigInOpenEphys, 16);
-        std::cout << "Blocksize set to " << USB3_BLOCK_SIZE << std::endl;
-        dev->SetWireInValue(WireInMultiUse, DDR_BLOCK_SIZE);
-        dev->UpdateWireIns();
-        dev->ActivateTriggerIn(TrigInOpenEphys, 17);
-        std::cout << "DDR burst set to " << DDR_BLOCK_SIZE << std::endl;
-    }
+
+    // Set up USB3 block transfer parameters.
+    // Divide by 4 to convert from bytes to 32-bit words (used in FPGA FIFO)
+    send_trigger_in(dev, TrigInConfig, 9, WireInMultiUse, USB3_BLOCK_SIZE / 4);
+    send_trigger_in(dev, TrigInConfig, 10, WireInMultiUse, RAM_BURST_SIZE);
+}
+
+// Low-level FPGA reset.  Call when closing application to make sure everything has stopped.
+void Rhd2000EvalBoard::resetFpga()
+{
+    lock_guard<mutex> lockOk(okMutex);
+
+    dev->ResetFPGA();
+    is_open = false;
 }
 
 // Set the FPGA to run continuously once started (if continuousMode == true) or to run until
 // maxTimeStep is reached (if continuousMode == false).
 void Rhd2000EvalBoard::setContinuousRunMode(bool continuousMode)
 {
+    lock_guard<mutex> lockOk(okMutex);
+
     if (continuousMode) {
         dev->SetWireInValue(WireInResetRun, 0x02, 0x02);
     } else {
@@ -724,30 +734,24 @@ void Rhd2000EvalBoard::setContinuousRunMode(bool continuousMode)
 // Set maxTimeStep for cases where continuousMode == false.
 void Rhd2000EvalBoard::setMaxTimeStep(unsigned int maxTimeStep)
 {
-    unsigned int maxTimeStepLsb, maxTimeStepMsb;
+    lock_guard<mutex> lockOk(okMutex);
 
-    maxTimeStepLsb = maxTimeStep & 0x0000ffff;
-    maxTimeStepMsb = maxTimeStep & 0xffff0000;
-
-    dev->SetWireInValue(WireInMaxTimeStepLsb, maxTimeStepLsb);
-    dev->SetWireInValue(WireInMaxTimeStepMsb, maxTimeStepMsb >> 16);
+    dev->SetWireInValue(WireInMaxTimeStep, maxTimeStep);
     dev->UpdateWireIns();
-
-
 }
 
 // Initiate SPI data acquisition.
 void Rhd2000EvalBoard::run()
 {
-    dev->UpdateWireOuts();
-//  std::std::cout << "Block size: " << dev->GetWireOutValue(0x26) << std::std::endl;
-//  std::std::cout << "Burst len: " << dev->GetWireOutValue(0x27) << std::std::endl;
+    lock_guard<mutex> lockOk(okMutex);
+
     dev->ActivateTriggerIn(TrigInSpiStart, 0);
 }
 
 // Is the FPGA currently running?
-bool Rhd2000EvalBoard::isRunning() const
+bool Rhd2000EvalBoard::isRunning()
 {
+    lock_guard<mutex> lockOk(okMutex);
     int value;
 
     dev->UpdateWireOuts();
@@ -762,110 +766,99 @@ bool Rhd2000EvalBoard::isRunning() const
 
 // Returns the number of 16-bit words in the USB FIFO.  The user should never attempt to read
 // more data than the FIFO currently contains, as it is not protected against underflow.
-unsigned int Rhd2000EvalBoard::numWordsInFifo() const
+// (Private method.)
+unsigned int Rhd2000EvalBoard::numWordsInFifo()
 {
+    lock_guard<mutex> lockOk(okMutex);
     dev->UpdateWireOuts();
-    return (dev->GetWireOutValue(WireOutNumWordsMsb) << 16) + dev->GetWireOutValue(WireOutNumWordsLsb);
+    lastNumWordsInFifo = dev->GetWireOutValue(WireOutNumWords);
+    return lastNumWordsInFifo;
 }
 
-// Returns the number of 16-bit words the USB SDRAM FIFO can hold.  The FIFO can actually hold a few
-// thousand words more than the number returned by this method due to FPGA "mini-FIFOs" interfacing
-// with the SDRAM, but this provides a conservative estimate of FIFO capacity.
-unsigned int Rhd2000EvalBoard::fifoCapacityInWords()
+// Set the delay for sampling the MISO line on a particular SPI port (PortA - PortH), in integer
+// clock steps, where each clock step is 1/2800 of a per-channel sampling period. Note: Cable delay
+// must be updated after sampleRate is changed, since cable delay calculations are based on the
+// clock frequency!
+void Rhd2000EvalBoard::setCableDelay(SPIPort port, int delay)
 {
-    return FIFO_CAPACITY_WORDS;
-}
-
-// Set the delay for sampling the MISO line on a particular SPI port (PortA - PortD), in integer clock
-// steps, where each clock step is 1/2800 of a per-channel sampling period.
-// Note: Cable delay must be updated after sampleRate is changed, since cable delay calculations are
-// based on the clock frequency!
-void Rhd2000EvalBoard::setCableDelay(BoardPort port, int delay)
-{
-    int bitShift;
-
-    if (delay < 0 || delay > 15) {
-        std::cerr << "Warning in Rhd2000EvalBoard::setCableDelay: delay out of range: " << delay  << std::endl;
+    lock_guard<mutex> lockOk(okMutex);
+    if (delay < -1 || delay > 15) {
+        cerr << "Warning in Rhd2000EvalBoard::setCableDelay: delay out of range: " << delay << endl;
+        return;
     }
 
-    if (delay < 0) delay = 0;
-    if (delay > 15) delay = 15;
-
-    switch (port) {
-    case PortA:
-        bitShift = 0;
-        cableDelay[0] = delay;
-        break;
-    case PortB:
-        bitShift = 4;
-        cableDelay[1] = delay;
-        break;
-    case PortC:
-        bitShift = 8;
-        cableDelay[2] = delay;
-        break;
-    case PortD:
-        bitShift = 12;
-        cableDelay[3] = delay;
-        break;
-    default:
-        std::cerr << "Error in RHD2000EvalBoard::setCableDelay: unknown port." << std::endl;
+    if (port == SPIPort::All) {
+        if (delay >= 0) set_wire_in<true>(dev, WireInMisoDelay, delay * 0x11111111);
+        std::fill(cableDelay.begin(), cableDelay.end(), delay);
+    } else {
+        const auto idx = static_cast<int>(port);
+        if (delay >= 0) set_wire_in<true>(dev, WireInMisoDelay, delay << 4 * idx, 0xf << 4 * idx);
+        cableDelay[idx] = delay;
     }
-
-    dev->SetWireInValue(WireInMisoDelay, delay << bitShift, 0x000f << bitShift);
-    dev->UpdateWireIns();
 }
 
-// Set the delay for sampling the MISO line on a particular SPI port (PortA - PortD) based on the length
-// of the cable between the FPGA and the RHD2000 chip (in meters).
-// Note: Cable delay must be updated after sampleRate is changed, since cable delay calculations are
-// based on the clock frequency!
-void Rhd2000EvalBoard::setCableLengthMeters(BoardPort port, double lengthInMeters)
+// Set the delay for sampling the MISO line on a particular SPI port (PortA - PortH) based on the
+// length of the cable between the FPGA and the RHD2000 chip (in meters). Note: Cable delay must be
+// updated after sampleRate is changed, since cable delay calculations are based on the clock
+// frequency!
+void Rhd2000EvalBoard::setCableLengthMeters(SPIPort port, double lengthInMeters)
 {
-    int delay;
     double tStep, cableVelocity, distance, timeDelay;
-    const double speedOfLight = 299792458.0;  // units = meters per second
-    const double xilinxLvdsOutputDelay = 1.9e-9;    // 1.9 ns Xilinx LVDS output pin delay
-    const double xilinxLvdsInputDelay = 1.4e-9;     // 1.4 ns Xilinx LVDS input pin delay
-    const double rhd2000Delay = 9.0e-9;             // 9.0 ns RHD2000 SCLK-to-MISO delay
-    const double misoSettleTime = 6.7e-9;           // 6.7 ns delay after MISO changes, before we sample it
+    const double speedOfLight = 299792458.0;      // units = meters per second
+    const double xilinxLvdsOutputDelay = 1.9e-9;  // 1.9 ns Xilinx LVDS output pin delay
+    const double xilinxLvdsInputDelay = 1.4e-9;   // 1.4 ns Xilinx LVDS input pin delay
+    const double rhd2000Delay = 9.0e-9;           // 9.0 ns RHD2000 SCLK-to-MISO delay
+    const double misoSettleTime = 6.7e-9;  // 6.7 ns delay after MISO changes, before we sample it
 
-    tStep = 1.0 / (2800.0 * getSampleRate());  // data clock that samples MISO has a rate 35 x 80 = 2800x higher than the sampling rate
-    // cableVelocity = 0.67 * speedOfLight;  // propogation velocity on cable: version 1.3 and earlier
-    cableVelocity = 0.555 * speedOfLight;  // propogation velocity on cable: version 1.4 improvement based on cable measurements
-    distance = 2.0 * lengthInMeters;      // round trip distance data must travel on cable
-    timeDelay = (distance / cableVelocity) + xilinxLvdsOutputDelay + rhd2000Delay + xilinxLvdsInputDelay + misoSettleTime;
+    tStep = 1.0 / (2800.0 * getSampleRate());  // data clock that samples MISO has a rate 35 x 80 =
+                                               // 2800x higher than the sampling rate
+    // cableVelocity = 0.67 * speedOfLight;  // propogation velocity on cable: version 1.3 and
+    // earlier
+    cableVelocity = 0.555 * speedOfLight;  // propogation velocity on cable: version 1.4 improvement
+                                           // based on cable measurements
+    distance = 2.0 * lengthInMeters;       // round trip distance data must travel on cable
+    timeDelay = (distance / cableVelocity) + xilinxLvdsOutputDelay + rhd2000Delay +
+                xilinxLvdsInputDelay + misoSettleTime;
 
-    delay = (int) floor(((timeDelay / tStep) + 1.0) + 0.5);
+    int delay = (int) floor(((timeDelay / tStep) + 1.0) + 0.5);
 
-    if (delay < 1) delay = 1;   // delay of zero is too short (due to I/O delays), even for zero-length cables
+    if (delay < 1)
+        delay = 1;  // delay of zero is too short (due to I/O delays), even for zero-length cables
 
     setCableDelay(port, delay);
 }
 
 // Same function as above, but accepts lengths in feet instead of meters
-void Rhd2000EvalBoard::setCableLengthFeet(BoardPort port, double lengthInFeet)
+void Rhd2000EvalBoard::setCableLengthFeet(SPIPort port, double lengthInFeet)
 {
-    setCableLengthMeters(port, 0.3048 * lengthInFeet);   // convert feet to meters
+    setCableLengthMeters(port, 0.3048 * lengthInFeet);  // convert feet to meters
 }
 
 // Estimate cable length based on a particular delay used in setCableDelay.
 // (Note: Depends on sample rate.)
 double Rhd2000EvalBoard::estimateCableLengthMeters(int delay) const
 {
-    double tStep, cableVelocity, distance;
-    const double speedOfLight = 299792458.0;  // units = meters per second
-    const double xilinxLvdsOutputDelay = 1.9e-9;    // 1.9 ns Xilinx LVDS output pin delay
-    const double xilinxLvdsInputDelay = 1.4e-9;     // 1.4 ns Xilinx LVDS input pin delay
-    const double rhd2000Delay = 9.0e-9;             // 9.0 ns RHD2000 SCLK-to-MISO delay
-    const double misoSettleTime = 6.7e-9;           // 6.7 ns delay after MISO changes, before we sample it
+    const double speedOfLight = 299792458.0;      // units = meters per second
+    const double xilinxLvdsOutputDelay = 1.9e-9;  // 1.9 ns Xilinx LVDS output pin delay
+    const double xilinxLvdsInputDelay = 1.4e-9;   // 1.4 ns Xilinx LVDS input pin delay
+    const double rhd2000Delay = 9.0e-9;           // 9.0 ns RHD2000 SCLK-to-MISO delay
+    const double misoSettleTime = 6.7e-9;  // 6.7 ns delay after MISO changes, before we sample it
 
-    tStep = 1.0 / (2800.0 * getSampleRate());  // data clock that samples MISO has a rate 35 x 80 = 2800x higher than the sampling rate
-    // cableVelocity = 0.67 * speedOfLight;  // propogation velocity on cable: version 1.3 and earlier
-    cableVelocity = 0.555 * speedOfLight;  // propogation velocity on cable: version 1.4 improvement based on cable measurements
+    const double tStep =
+        1.0 / (2800.0 * getSampleRate());  // data clock that samples MISO has a rate 35 x 80 =
+                                           // 2800x higher than the sampling rate
+    // cableVelocity = 0.67 * speedOfLight;  // propogation velocity on cable: version 1.3 and
+    // earlier
+    const double cableVelocity =
+        0.555 * speedOfLight;  // propogation velocity on cable: version 1.4 improvement
+                               // based on cable measurements
 
-    // distance = cableVelocity * (delay * tStep - (xilinxLvdsOutputDelay + rhd2000Delay + xilinxLvdsInputDelay));  // version 1.3 and earlier
-    distance = cableVelocity * ((((double) delay) - 1.0) * tStep - (xilinxLvdsOutputDelay + rhd2000Delay + xilinxLvdsInputDelay + misoSettleTime));  // version 1.4 improvement
+    // distance = cableVelocity * (delay * tStep - (xilinxLvdsOutputDelay + rhd2000Delay +
+    // xilinxLvdsInputDelay));  // version 1.3 and earlier
+    double distance =
+        cableVelocity * ((((double) delay) - 1.0) * tStep -
+                         (xilinxLvdsOutputDelay + rhd2000Delay + xilinxLvdsInputDelay +
+                          misoSettleTime));  // version 1.4 improvement
     if (distance < 0.0) distance = 0.0;
 
     return (distance / 2.0);
@@ -877,143 +870,59 @@ double Rhd2000EvalBoard::estimateCableLengthFeet(int delay) const
     return 3.2808 * estimateCableLengthMeters(delay);
 }
 
-// Turn on or off DSP settle function in the FPGA.  (Only executes when CONVERT commands are sent.)
+// Turn on or off DSP settle function in the FPGA.  (Executes only when CONVERT commands are sent.)
 void Rhd2000EvalBoard::setDspSettle(bool enabled)
 {
+    lock_guard<mutex> lockOk(okMutex);
+
     dev->SetWireInValue(WireInResetRun, (enabled ? 0x04 : 0x00), 0x04);
     dev->UpdateWireIns();
 }
 
-// Assign a particular data source (e.g., PortA1, PortA2, PortB1,...) to one of the eight
-// available USB data streams (0-7).
-void Rhd2000EvalBoard::setDataSource(int stream, BoardDataSource dataSource)
-{
-    int bitShift;
-    OkEndPoint endPoint;
-
-    if (stream < 0 || stream > (MAX_NUM_DATA_STREAMS - 1)) {
-        std::cerr << "Error in Rhd2000EvalBoard::setDataSource: stream out of range." << std::endl;
-        return;
-    }
-
-    switch (stream) {
-    case 0:
-        endPoint = WireInDataStreamSel1234;
-        bitShift = 0;
-        break;
-    case 1:
-        endPoint = WireInDataStreamSel1234;
-        bitShift = 4;
-        break;
-    case 2:
-        endPoint = WireInDataStreamSel1234;
-        bitShift = 8;
-        break;
-    case 3:
-        endPoint = WireInDataStreamSel1234;
-        bitShift = 12;
-        break;
-    case 4:
-        endPoint = WireInDataStreamSel5678;
-        bitShift = 0;
-        break;
-    case 5:
-        endPoint = WireInDataStreamSel5678;
-        bitShift = 4;
-        break;
-    case 6:
-        endPoint = WireInDataStreamSel5678;
-        bitShift = 8;
-        break;
-    case 7:
-        endPoint = WireInDataStreamSel5678;
-        bitShift = 12;
-        break;
-    case 8:
-        endPoint = WireInDataStreamSel1234;
-        bitShift = 16;
-        break;
-    case 9:
-        endPoint = WireInDataStreamSel1234;
-        bitShift = 20;
-        break;
-    case 10:
-        endPoint = WireInDataStreamSel1234;
-        bitShift = 24;
-        break;
-    case 11:
-        endPoint = WireInDataStreamSel1234;
-        bitShift = 28;
-        break;
-    case 12:
-        endPoint = WireInDataStreamSel5678;
-        bitShift = 16;
-        break;
-    case 13:
-        endPoint = WireInDataStreamSel5678;
-        bitShift = 20;
-        break;
-    case 14:
-        endPoint = WireInDataStreamSel5678;
-        bitShift = 24;
-        break;
-    case 15:
-        endPoint = WireInDataStreamSel5678;
-        bitShift = 28;
-        break;
-    }
-
-    dev->SetWireInValue(endPoint, dataSource << bitShift, 0x000f << bitShift);
-    dev->UpdateWireIns();
-}
-
-// Enable or disable one of the eight available USB data streams (0-7).
+// Enable or disable one of the 32 available USB data streams (0-31).
 void Rhd2000EvalBoard::enableDataStream(int stream, bool enabled)
 {
+    lock_guard<mutex> lockOk(okMutex);
+
     if (stream < 0 || stream > (MAX_NUM_DATA_STREAMS - 1)) {
-        std::cerr << "Error in Rhd2000EvalBoard::setDataSource: stream out of range." << std::endl;
+        cerr << "Error in Rhd2000EvalBoard::enableDataStream: stream out of range." << endl;
         return;
     }
 
     if (enabled) {
         if (dataStreamEnabled[stream] == 0) {
-            dev->SetWireInValue(WireInDataStreamEn, 0x0001 << stream, 0x0001 << stream);
-            dev->UpdateWireIns();
+            set_wire_in<true>(dev, WireInDataStreamEn, 1 << stream, 1 << stream);
             dataStreamEnabled[stream] = 1;
-            ++numDataStreams;
+            numDataStreams++;
         }
     } else {
         if (dataStreamEnabled[stream] == 1) {
-            dev->SetWireInValue(WireInDataStreamEn, 0x0000 << stream, 0x0001 << stream);
-            dev->UpdateWireIns();
+            set_wire_in<true>(dev, WireInDataStreamEn, 0, 1 << stream);
             dataStreamEnabled[stream] = 0;
             numDataStreams--;
         }
     }
 }
 
-// Returns the number of enabled data streams.
-int Rhd2000EvalBoard::getNumEnabledDataStreams() const
-{
-    return numDataStreams;
-}
-
 // Set all 16 bits of the digital TTL output lines on the FPGA to zero.
 void Rhd2000EvalBoard::clearTtlOut()
 {
+    lock_guard<mutex> lockOk(okMutex);
+
     dev->SetWireInValue(WireInTtlOut, 0x0000);
     dev->UpdateWireIns();
 }
 
-// Set the 16 bits of the digital TTL output lines on the FPGA high or low according to integer array.
+// Set the 16 bits of the digital TTL output lines on the FPGA high or low according to integer
+// array.
 void Rhd2000EvalBoard::setTtlOut(int ttlOutArray[])
 {
+    lock_guard<mutex> lockOk(okMutex);
     int i, ttlOut;
 
     ttlOut = 0;
     for (i = 0; i < 16; ++i) {
-        if (ttlOutArray[i] > 0)
-            ttlOut += 1 << i;
+        if (ttlOutArray[i] > 0) ttlOut += 1 << i;
     }
     dev->SetWireInValue(WireInTtlOut, ttlOut);
     dev->UpdateWireIns();
@@ -1022,23 +931,25 @@ void Rhd2000EvalBoard::setTtlOut(int ttlOutArray[])
 // Read the 16 bits of the digital TTL input lines on the FPGA into an integer array.
 void Rhd2000EvalBoard::getTtlIn(int ttlInArray[])
 {
+    lock_guard<mutex> lockOk(okMutex);
     int i, ttlIn;
 
     dev->UpdateWireOuts();
     ttlIn = dev->GetWireOutValue(WireOutTtlIn);
 
-    for (i = 0; i < 16; ++i) {
+    // kontexdev!
+    for (i = 0; i < MAX_DIO; ++i) {
         ttlInArray[i] = 0;
-        if ((ttlIn & (1 << i)) > 0)
-            ttlInArray[i] = 1;
+        if ((ttlIn & (1 << i)) > 0) ttlInArray[i] = 1;
     }
 }
 
-// Set manual value for DACs.
+// Set manual value for DACs.  Must run SPI commands for this value to take effect.
 void Rhd2000EvalBoard::setDacManual(int value)
 {
+    lock_guard<mutex> lockOk(okMutex);
     if (value < 0 || value > 65535) {
-        std::cerr << "Error in Rhd2000EvalBoard::setDacManual: value out of range." << std::endl;
+        cerr << "Error in Rhd2000EvalBoard::setDacManual: value out of range." << endl;
         return;
     }
 
@@ -1046,64 +957,54 @@ void Rhd2000EvalBoard::setDacManual(int value)
     dev->UpdateWireIns();
 }
 
-// Set the eight red LEDs on the XEM6010 board according to integer array.
+// Set the eight red LEDs on the Opal Kelly XEM6310 board according to integer array.
 void Rhd2000EvalBoard::setLedDisplay(int ledArray[])
 {
+    lock_guard<mutex> lockOk(okMutex);
     int i, ledOut;
 
     ledOut = 0;
     for (i = 0; i < 8; ++i) {
-        if (ledArray[i] > 0)
-            ledOut += 1 << i;
+        if (ledArray[i] > 0) ledOut += 1 << i;
     }
     dev->SetWireInValue(WireInLedDisplay, ledOut);
     dev->UpdateWireIns();
 }
 
-// Enable or disable AD5662 DAC channel (0-7)
+// Set the eight red LEDs on the front panel SPI ports according to integer array.
+void Rhd2000EvalBoard::setSpiLedDisplay(int ledArray[])
+{
+    lock_guard<mutex> lockOk(okMutex);
+    int i, ledOut;
+
+    ledOut = 0;
+    for (i = 0; i < 8; ++i) {
+        if (ledArray[i] > 0) ledOut += 1 << i;
+    }
+    dev->SetWireInValue(WireInMultiUse, ledOut);
+    dev->UpdateWireIns();
+    dev->ActivateTriggerIn(TrigInConfig, 8);
+}
+
+
+
+// Enable or disable DAC channel (0-7)
 void Rhd2000EvalBoard::enableDac(int dacChannel, bool enabled)
 {
+    lock_guard<mutex> lockOk(okMutex);
     if (dacChannel < 0 || dacChannel > 7) {
-        std::cerr << "Error in Rhd2000EvalBoard::enableDac: dacChannel out of range." << std::endl;
+        cerr << "Error in Rhd2000EvalBoard::enableDac: dacChannel out of range." << endl;
         return;
     }
-
-    UINT32 dacEnMask = usb3 ? 0x0400 : 0x0200;
-
-    switch (dacChannel) {
-    case 0:
-        dev->SetWireInValue(WireInDacSource1, (enabled ? dacEnMask : 0x0000), dacEnMask);
-        break;
-    case 1:
-        dev->SetWireInValue(WireInDacSource2, (enabled ? dacEnMask : 0x0000), dacEnMask);
-        break;
-    case 2:
-        dev->SetWireInValue(WireInDacSource3, (enabled ? dacEnMask : 0x0000), dacEnMask);
-        break;
-    case 3:
-        dev->SetWireInValue(WireInDacSource4, (enabled ? dacEnMask : 0x0000), dacEnMask);
-        break;
-    case 4:
-        dev->SetWireInValue(WireInDacSource5, (enabled ? dacEnMask : 0x0000), dacEnMask);
-        break;
-    case 5:
-        dev->SetWireInValue(WireInDacSource6, (enabled ? dacEnMask : 0x0000), dacEnMask);
-        break;
-    case 6:
-        dev->SetWireInValue(WireInDacSource7, (enabled ? dacEnMask : 0x0000), dacEnMask);
-        break;
-    case 7:
-        dev->SetWireInValue(WireInDacSource8, (enabled ? dacEnMask : 0x0000), dacEnMask);
-        break;
-    }
-    dev->UpdateWireIns();
+    set_wire_in<true>(dev, WireInDacSource[dacChannel], (enabled ? 0x0800 : 0x0000), 0x0800);
 }
 
 // Set the gain level of all eight DAC channels to 2^gain (gain = 0-7).
 void Rhd2000EvalBoard::setDacGain(int gain)
 {
+    lock_guard<mutex> lockOk(okMutex);
     if (gain < 0 || gain > 7) {
-        std::cerr << "Error in Rhd2000EvalBoard::setDacGain: gain out of range." << std::endl;
+        cerr << "Error in Rhd2000EvalBoard::setDacGain: gain setting out of range." << endl;
         return;
     }
 
@@ -1111,12 +1012,16 @@ void Rhd2000EvalBoard::setDacGain(int gain)
     dev->UpdateWireIns();
 }
 
+
 // Suppress the noise on DAC channels 0 and 1 (the audio channels) between
 // +16*noiseSuppress and -16*noiseSuppress LSBs.  (noiseSuppress = 0-127).
 void Rhd2000EvalBoard::setAudioNoiseSuppress(int noiseSuppress)
 {
+    lock_guard<mutex> lockOk(okMutex);
+
     if (noiseSuppress < 0 || noiseSuppress > 127) {
-        std::cerr << "Error in Rhd2000EvalBoard::setAudioNoiseSuppress: noiseSuppress out of range." << std::endl;
+        cerr << "Error in Rhd2000EvalBoard::setAudioNoiseSuppress: noiseSuppress out of range."
+             << endl;
         return;
     }
 
@@ -1124,91 +1029,65 @@ void Rhd2000EvalBoard::setAudioNoiseSuppress(int noiseSuppress)
     dev->UpdateWireIns();
 }
 
-// Assign a particular data stream (0-7) to a DAC channel (0-7).  Setting stream
-// to 8 selects DacManual1 value; setting stream to 9 selects DacManual2 value.
+// Assign a particular data stream (0-31) to a DAC channel (0-7).  Setting stream
+// to 32 selects DacManual value.
 void Rhd2000EvalBoard::selectDacDataStream(int dacChannel, int stream)
 {
+    lock_guard<mutex> lockOk(okMutex);
+
     if (dacChannel < 0 || dacChannel > 7) {
-        std::cerr << "Error in Rhd2000EvalBoard::selectDacDataStream: dacChannel out of range." << std::endl;
+        cerr << "Error in Rhd2000EvalBoard::selectDacDataStream: dacChannel out of range." << endl;
         return;
     }
 
-    if (stream < 0 || stream > MAX_NUM_DATA_STREAMS +1) {
-        std::cerr << "Error in Rhd2000EvalBoard::selectDacDataStream: stream out of range." << std::endl;
+    // kontexdev
+    if (stream < 0 || stream > 33) {
+        cerr << "Error in Rhd2000EvalBoard::selectDacDataStream: stream out of range." << endl;
         return;
     }
-
-    UINT32 dacStreamMask = (usb3 ? 0x03e0 : 0x01e0);
-
-    switch (dacChannel) {
-    case 0:
-        dev->SetWireInValue(WireInDacSource1, stream << 5, dacStreamMask);
-        break;
-    case 1:
-        dev->SetWireInValue(WireInDacSource2, stream << 5, dacStreamMask);
-        break;
-    case 2:
-        dev->SetWireInValue(WireInDacSource3, stream << 5, dacStreamMask);
-        break;
-    case 3:
-        dev->SetWireInValue(WireInDacSource4, stream << 5, dacStreamMask);
-        break;
-    case 4:
-        dev->SetWireInValue(WireInDacSource5, stream << 5, dacStreamMask);
-        break;
-    case 5:
-        dev->SetWireInValue(WireInDacSource6, stream << 5, dacStreamMask);
-        break;
-    case 6:
-        dev->SetWireInValue(WireInDacSource7, stream << 5, dacStreamMask);
-        break;
-    case 7:
-        dev->SetWireInValue(WireInDacSource8, stream << 5, dacStreamMask);
-        break;
-    }
-    dev->UpdateWireIns();
+    set_wire_in<true>(dev, WireInDacSource[dacChannel], stream << 5, 0x07e0);
 }
 
 // Assign a particular amplifier channel (0-31) to a DAC channel (0-7).
 void Rhd2000EvalBoard::selectDacDataChannel(int dacChannel, int dataChannel)
 {
+    lock_guard<mutex> lockOk(okMutex);
+
     if (dacChannel < 0 || dacChannel > 7) {
-        std::cerr << "Error in Rhd2000EvalBoard::selectDacDataChannel: dacChannel out of range." << std::endl;
+        cerr << "Error in Rhd2000EvalBoard::selectDacDataChannel: dacChannel out of range." << endl;
         return;
     }
 
     if (dataChannel < 0 || dataChannel > 31) {
-        std::cerr << "Error in Rhd2000EvalBoard::selectDacDataChannel: dataChannel out of range." << std::endl;
+        cerr << "Error in Rhd2000EvalBoard::selectDacDataChannel: dataChannel out of range."
+             << endl;
         return;
     }
+    set_wire_in<true>(dev, WireInDacSource[dacChannel], dataChannel << 0, 0x001f);
+}
 
-    switch (dacChannel) {
-    case 0:
-        dev->SetWireInValue(WireInDacSource1, dataChannel << 0, 0x001f);
-        break;
-    case 1:
-        dev->SetWireInValue(WireInDacSource2, dataChannel << 0, 0x001f);
-        break;
-    case 2:
-        dev->SetWireInValue(WireInDacSource3, dataChannel << 0, 0x001f);
-        break;
-    case 3:
-        dev->SetWireInValue(WireInDacSource4, dataChannel << 0, 0x001f);
-        break;
-    case 4:
-        dev->SetWireInValue(WireInDacSource5, dataChannel << 0, 0x001f);
-        break;
-    case 5:
-        dev->SetWireInValue(WireInDacSource6, dataChannel << 0, 0x001f);
-        break;
-    case 6:
-        dev->SetWireInValue(WireInDacSource7, dataChannel << 0, 0x001f);
-        break;
-    case 7:
-        dev->SetWireInValue(WireInDacSource8, dataChannel << 0, 0x001f);
-        break;
+
+
+void Rhd2000EvalBoard::config_dac(int channel, bool enable, int source_stream, int source_channel)
+{
+    const bool rhs = false;
+    if (channel < 0 || channel > ports.num_of_dac) {
+        std::cerr << "channel out of range" << std::endl;
+        return;
     }
-    dev->UpdateWireIns();
+    if (source_stream < 0 || source_stream > (ports.max_streams + 1)) {
+        std::cerr << "stream out of range" << std::endl;
+        return;
+    }
+    if (source_channel < 0 || source_channel > 31) {
+        std::cerr << "channel out of range" << std::endl;
+        return;
+    }
+    // RHD [enable:1bit, stream:6bit, channel:5bit]
+    // RHS [enable:1bit, stream:4bit, channel:5bit]
+    set_wire_in<true>(dev, WireInDacSource[channel],
+                      (enable * (rhs ? 0x0200 : 0x0800)) | (source_stream << 5) | source_channel,
+                      rhs ? 0x3fff : 0xffff);
 }
 
 // Enable external triggering of amplifier hardware 'fast settle' function (blanking).
@@ -1216,78 +1095,60 @@ void Rhd2000EvalBoard::selectDacDataChannel(int dacChannel, int dataChannel)
 // chips will be controlled in real time via one of the 16 TTL inputs.
 void Rhd2000EvalBoard::enableExternalFastSettle(bool enable)
 {
+    lock_guard<mutex> lockOk(okMutex);
+
     dev->SetWireInValue(WireInMultiUse, enable ? 1 : 0);
     dev->UpdateWireIns();
-    dev->ActivateTriggerIn(TrigInExtFastSettle, 0);
+    dev->ActivateTriggerIn(TrigInConfig, 6);
 }
 
 // Select which of the TTL inputs 0-15 is used to perform a hardware 'fast settle' (blanking)
 // of the amplifiers if external triggering of fast settling is enabled.
 void Rhd2000EvalBoard::setExternalFastSettleChannel(int channel)
 {
+    lock_guard<mutex> lockOk(okMutex);
+
     if (channel < 0 || channel > 15) {
-        std::cerr << "Error in Rhd2000EvalBoard::setExternalFastSettleChannel: channel "<< channel << " out of range." << std::endl;
+        cerr << "Error in Rhd2000EvalBoard::setExternalFastSettleChannel: channel out of range."
+             << endl;
         return;
     }
 
     dev->SetWireInValue(WireInMultiUse, channel);
     dev->UpdateWireIns();
-    dev->ActivateTriggerIn(TrigInExtFastSettle, 1);
+    dev->ActivateTriggerIn(TrigInConfig, 7);
 }
 
 // Enable external control of RHD2000 auxiliary digital output pin (auxout).
 // If external control is enabled, the digital output of all chips connected to a
 // selected SPI port will be controlled in real time via one of the 16 TTL inputs.
-void Rhd2000EvalBoard::enableExternalDigOut(BoardPort port, bool enable)
+void Rhd2000EvalBoard::enableExternalDigOut(SPIPort port, bool enable)
 {
-    dev->SetWireInValue(WireInMultiUse, enable ? 1 : 0);
-    dev->UpdateWireIns();
-
-    switch (port) {
-    case PortA:
-        dev->ActivateTriggerIn(TrigInExtDigOut, 0);
-        break;
-    case PortB:
-        dev->ActivateTriggerIn(TrigInExtDigOut, 1);
-        break;
-    case PortC:
-        dev->ActivateTriggerIn(TrigInExtDigOut, 2);
-        break;
-    case PortD:
-        dev->ActivateTriggerIn(TrigInExtDigOut, 3);
-        break;
-    default:
-        std::cerr << "Error in Rhd2000EvalBoard::enableExternalDigOut: port out of range." << std::endl;
+    lock_guard<mutex> lockOk(okMutex);
+    if (port == SPIPort::All) {
+        for (int i = 0; i < ports.num_of_spi; ++i)
+            send_trigger_in(dev, TrigInDacConfig, 16 + i, WireInMultiUse, int(enable));
+    } else {
+        send_trigger_in(dev, TrigInDacConfig, 16 + static_cast<int>(port), WireInMultiUse,
+                        int(enable));
     }
 }
 
 // Select which of the TTL inputs 0-15 is used to control the auxiliary digital output
 // pin of the chips connected to a particular SPI port, if external control of auxout is enabled.
-void Rhd2000EvalBoard::setExternalDigOutChannel(BoardPort port, int channel)
+void Rhd2000EvalBoard::setExternalDigOutChannel(SPIPort port, int channel)
 {
+    lock_guard<mutex> lockOk(okMutex);
+
     if (channel < 0 || channel > 15) {
-        std::cerr << "Error in Rhd2000EvalBoard::setExternalDigOutChannel: channel out of range." << std::endl;
+        cerr << "Error in Rhd2000EvalBoard::setExternalDigOutChannel: channel out of range.\n";
         return;
     }
-
-    dev->SetWireInValue(WireInMultiUse, channel);
-    dev->UpdateWireIns();
-
-    switch (port) {
-    case PortA:
-        dev->ActivateTriggerIn(TrigInExtDigOut, 4);
-        break;
-    case PortB:
-        dev->ActivateTriggerIn(TrigInExtDigOut, 5);
-        break;
-    case PortC:
-        dev->ActivateTriggerIn(TrigInExtDigOut, 6);
-        break;
-    case PortD:
-        dev->ActivateTriggerIn(TrigInExtDigOut, 7);
-        break;
-    default:
-        std::cerr << "Error in Rhd2000EvalBoard::setExternalDigOutChannel: port out of range." << std::endl;
+    if (port == SPIPort::All) {
+        for (int i = 0; i < ports.num_of_spi; ++i)
+            send_trigger_in(dev, TrigInDacConfig, 24 + i, WireInMultiUse, channel);
+    } else {
+        send_trigger_in(dev, TrigInDacConfig, 24 + static_cast<int>(port), WireInMultiUse, channel);
     }
 }
 
@@ -1298,9 +1159,11 @@ void Rhd2000EvalBoard::setExternalDigOutChannel(BoardPort port, int channel)
 // outputs, for example.
 void Rhd2000EvalBoard::enableDacHighpassFilter(bool enable)
 {
+    lock_guard<mutex> lockOk(okMutex);
+
     dev->SetWireInValue(WireInMultiUse, enable ? 1 : 0);
     dev->UpdateWireIns();
-    dev->ActivateTriggerIn(TrigInDacHpf, 0);
+    dev->ActivateTriggerIn(TrigInConfig, 4);
 }
 
 // Set cutoff frequency (in Hz) for optional FPGA-implemented digital high-pass filters
@@ -1310,6 +1173,8 @@ void Rhd2000EvalBoard::enableDacHighpassFilter(bool enable)
 // and produce digital pulses on the TTL outputs, for example.
 void Rhd2000EvalBoard::setDacHighpassFilter(double cutoff)
 {
+    lock_guard<mutex> lockOk(okMutex);
+
     double b;
     int filterCoefficient;
     const double pi = 3.1415926535897;
@@ -1329,35 +1194,38 @@ void Rhd2000EvalBoard::setDacHighpassFilter(double cutoff)
 
     dev->SetWireInValue(WireInMultiUse, filterCoefficient);
     dev->UpdateWireIns();
-    dev->ActivateTriggerIn(TrigInDacHpf, 1);
+    dev->ActivateTriggerIn(TrigInConfig, 5);
 }
 
 // Set thresholds for DAC channels; threshold output signals appear on TTL outputs 0-7.
 // The parameter 'threshold' corresponds to the RHD2000 chip ADC output value, and must fall
 // in the range of 0 to 65535, where the 'zero' level is 32768.
-// If trigPolarity is true, voltages equaling or rising above the threshold produce a high TTL output.
-// If trigPolarity is false, voltages equaling or falling below the threshold produce a high TTL output.
+// If trigPolarity is true, voltages equaling or rising above the threshold produce a high TTL
+// output. If trigPolarity is false, voltages equaling or falling below the threshold produce a high
+// TTL output.
 void Rhd2000EvalBoard::setDacThreshold(int dacChannel, int threshold, bool trigPolarity)
 {
+    lock_guard<mutex> lockOk(okMutex);
+
     if (dacChannel < 0 || dacChannel > 7) {
-        std::cerr << "Error in Rhd2000EvalBoard::setDacThreshold: dacChannel out of range." << std::endl;
+        cerr << "Error in Rhd2000EvalBoard::setDacThreshold: dacChannel out of range." << endl;
         return;
     }
 
     if (threshold < 0 || threshold > 65535) {
-        std::cerr << "Error in Rhd2000EvalBoard::setDacThreshold: threshold out of range." << std::endl;
+        cerr << "Error in Rhd2000EvalBoard::setDacThreshold: threshold out of range." << endl;
         return;
     }
 
     // Set threshold level.
     dev->SetWireInValue(WireInMultiUse, threshold);
     dev->UpdateWireIns();
-    dev->ActivateTriggerIn(TrigInDacThresh, dacChannel);
+    dev->ActivateTriggerIn(TrigInDacConfig, dacChannel);
 
     // Set threshold polarity.
     dev->SetWireInValue(WireInMultiUse, (trigPolarity ? 1 : 0));
     dev->UpdateWireIns();
-    dev->ActivateTriggerIn(TrigInDacThresh, dacChannel + 8);
+    dev->ActivateTriggerIn(TrigInDacConfig, dacChannel + 8);
 }
 
 // Set the TTL output mode of the board.
@@ -1366,8 +1234,10 @@ void Rhd2000EvalBoard::setDacThreshold(int dacChannel, int threshold, bool trigP
 //           Bottom 8 TTL outputs are outputs of DAC comparators
 void Rhd2000EvalBoard::setTtlMode(int mode)
 {
+    lock_guard<mutex> lockOk(okMutex);
+
     if (mode < 0 || mode > 1) {
-        std::cerr << "Error in Rhd2000EvalBoard::setTtlMode: mode out of range." << std::endl;
+        cerr << "Error in Rhd2000EvalBoard::setTtlMode: mode out of range." << endl;
         return;
     }
 
@@ -1401,305 +1271,303 @@ bool Rhd2000EvalBoard::isDataClockLocked() const
 // data acquisition has been stopped.)
 void Rhd2000EvalBoard::flush()
 {
+    lock_guard<mutex> lockOk(okMutex);
 
-    if (usb3)
-    {
-        dev->SetWireInValue(WireInResetRun, 1 << 16, 1 << 16); //Override pipeout block throttle
-        dev->UpdateWireIns();
-        //std::cout << "Pre-Flush: " << numWordsInFifo() << std::endl;
-        while (numWordsInFifo() >= USB_BUFFER_SIZE / 2) {
-            dev->ReadFromBlockPipeOut(PipeOutData, USB3_BLOCK_SIZE, USB_BUFFER_SIZE, usbBuffer);
-        //  std::cout << "Flush phase A: " << numWordsInFifo() << std::endl;
-        }
-        while (numWordsInFifo() > 0) {
-            dev->ReadFromBlockPipeOut(PipeOutData, USB3_BLOCK_SIZE, USB3_BLOCK_SIZE * std::max(2 * numWordsInFifo() / USB3_BLOCK_SIZE, (unsigned int)1), usbBuffer);
-        //  std::cout << "Flush phase B: " << numWordsInFifo() << std::endl;
-        //  printFIFOmetrics();
-        }
-        dev->SetWireInValue(WireInResetRun, 0, 1 << 16);
-        dev->UpdateWireIns();
-    }
-    else
-    {
-        while (numWordsInFifo() >= USB_BUFFER_SIZE / 2) {
-            dev->ReadFromPipeOut(PipeOutData, USB_BUFFER_SIZE, usbBuffer);
-        }
-        while (numWordsInFifo() > 0) {
-            dev->ReadFromPipeOut(PipeOutData, 2 * numWordsInFifo(), usbBuffer);
-        }
-    }
+    // override pipeout block throttle
+    // read all data from fifo
+    // reset pipeout block throttle
+
+    dev->SetWireInValue(WireInResetRun, 1 << 17, 1 << 17);
+    dev->UpdateWireIns();
+
+    dev->SetWireInValue(WireInResetRun, 0 << 17, 1 << 17);
+    dev->UpdateWireIns();
 }
 
+// Reads a certain number of USB data blocks, if the specified number is available, and writes the
+// raw bytes to a buffer.  Returns total number of bytes read.
+long Rhd2000EvalBoard::read_raw_samples(int samples, unsigned char *buffer)
+{
+    // force user to check for available blocks before reading
+    const auto samples_available = get_num_samples_available(false);
+    if (samples_available < samples) {
+        cerr << "Not enough data blocks available to read, or did not check for available blocks\n";
+        return 0;
+    }
+
+    long result = dev->ReadFromBlockPipeOut(PipeOutData, USB3_BLOCK_SIZE,
+                                            samples * get_sample_size<char>(), buffer);
+
+    if (result == ok_Failed) {
+        cerr << "CRITICAL (readDataBlocksRaw): Failure on BT pipe read.  Check block and buffer "
+                "sizes.\n";
+    } else if (result == ok_Timeout) {
+        cerr << "CRITICAL (readDataBlocksRaw): Timeout on BT pipe read.  Check block and buffer "
+                "sizes.\n";
+    }
+
+    return result;
+}
+
+std::optional<Rhd2000DataBlock> Rhd2000EvalBoard::run_and_read_samples(
+    int samples, std::optional<std::chrono::milliseconds> timeout)
+{
+    setMaxTimeStep(samples);
+    setContinuousRunMode(false);
+    run();
+    if (timeout) {
+        auto start = std::chrono::high_resolution_clock::now();
+        while (isRunning()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            auto now = std::chrono::high_resolution_clock::now();
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start) > *timeout) {
+                std::cerr << "Timeout waiting for data block" << std::endl;
+                return std::nullopt;
+            }
+        }
+    } else {
+        while (isRunning())
+            ;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    auto available = get_num_samples_available(true);
+    if (available != samples) {
+        std::cerr << "Error: expected " << samples << " samples, got " << available << std::endl;
+        return std::nullopt;
+    }
+
+    return read_samples(samples);
+}
 // Read data block from the USB interface, if one is available.  Returns true if data block
 // was available.
-bool Rhd2000EvalBoard::readDataBlock(Rhd2000DataBlock *dataBlock, int nSamples)
+std::optional<Rhd2000DataBlock> Rhd2000EvalBoard::read_samples(int samples)
 {
-    unsigned int numBytesToRead;
-    long res;
-
-    numBytesToRead = 2 * dataBlock->calculateDataBlockSizeInWords(numDataStreams, usb3, nSamples);
-
-    if (numBytesToRead > USB_BUFFER_SIZE) {
-        std::cerr << "Error in Rhd2000EvalBoard::readDataBlock: USB buffer size exceeded.  " <<
-                "Increase value of USB_BUFFER_SIZE." << std::endl;
-        return false;
+    lock_guard<mutex> lockOk(okMutex);
+    auto result = read_raw_samples(samples, &usbBuffer[0]);
+    if (result < 0) {
+        std::cerr << "Error reading data block " << result << std::endl;
+        return std::nullopt;
     }
-
-    if (usb3)
-    {
-        //std::std::cout << "usb3 read : " << numBytesToRead << " in " << USB3_BLOCK_SIZE << " blocks" << std::std::endl;
-        res = dev->ReadFromBlockPipeOut(PipeOutData, USB3_BLOCK_SIZE, numBytesToRead, usbBuffer);
-
-    }
-    else
-    {
-        //std::std::cout << "usb2 read: " << numBytesToRead << std::std::endl;
-        res = dev->ReadFromPipeOut(PipeOutData, numBytesToRead, usbBuffer);
-    }
-    if (res == ok_Timeout)
-    {
-        std::cerr << "CRITICAL: Timeout on pipe read. Check block and buffer sizes." << std::endl;
-    }
-    dataBlock->fillFromUsbBuffer(usbBuffer, 0, numDataStreams, nSamples);
-
-    return true;
+    return std::make_optional<Rhd2000DataBlock>(numDataStreams, samples, dio32, &usbBuffer[0]);
 }
 
-bool Rhd2000EvalBoard::readRawDataBlock(unsigned char** bufferPtr, int nSamples)
+int Rhd2000EvalBoard::read_to_buffer(int samples, unsigned char *buffer)
 {
-    unsigned int numBytesToRead;
-    long res;
-
-    numBytesToRead = 2 * Rhd2000DataBlock::calculateDataBlockSizeInWords(numDataStreams, usb3, nSamples);
-
-    if (numBytesToRead > USB_BUFFER_SIZE) {
-        std::cerr << "Error in Rhd2000EvalBoard::readDataBlock: USB buffer size exceeded.  " <<
-            "Increase value of USB_BUFFER_SIZE." << std::endl;
-        *bufferPtr = nullptr;
-        return false;
+    lock_guard<mutex> lockOk(okMutex);
+    auto result = read_raw_samples(samples, buffer);
+    if (result < 0) {
+        std::cerr << "Error reading data block " << result << std::endl;
+        return -1;
     }
-
-    if (usb3)
-    {
-        //std::std::cout << "usb3 read : " << numBytesToRead << " in " << USB3_BLOCK_SIZE << " blocks" << std::std::endl;
-        res = dev->ReadFromBlockPipeOut(PipeOutData, USB3_BLOCK_SIZE, numBytesToRead, usbBuffer);
-
-    }
-    else
-    {
-        //std::std::cout << "usb2 read: " << numBytesToRead << std::std::endl;
-        res = dev->ReadFromPipeOut(PipeOutData, numBytesToRead, usbBuffer);
-    }
-    if (res == ok_Timeout)
-    {
-        std::cerr << "CRITICAL: Timeout on pipe read. Check block and buffer sizes." << std::endl;
-    }
-    *bufferPtr = usbBuffer;
-    return true;
+    return result;
 }
-
 // Reads a certain number of USB data blocks, if the specified number is available, and appends them
 // to queue.  Returns true if data blocks were available.
+
 bool Rhd2000EvalBoard::readDataBlocks(int numBlocks, std::queue<Rhd2000DataBlock> &dataQueue)
 {
-    unsigned int numWordsToRead, numBytesToRead;
-    int i;
-    Rhd2000DataBlock *dataBlock;
-    long res;
+    lock_guard<mutex> lockOk(okMutex);
 
-    numWordsToRead = numBlocks * dataBlock->calculateDataBlockSizeInWords(numDataStreams, usb3);
+    auto result = read_raw_samples(numBlocks * SAMPLES_PER_DATA_BLOCK, &usbBuffer[0]);
+    const auto bs =
+        block_size<char>(SAMPLES_PER_DATA_BLOCK, numDataStreams, CHANNELS_PER_STREAM, dio32);
 
-    if (numWordsInFifo() < numWordsToRead)
-        return false;
-
-    numBytesToRead = 2 * numWordsToRead;
-
-    if (numBytesToRead > USB_BUFFER_SIZE) {
-        std::cerr << "Error in Rhd2000EvalBoard::readDataBlocks: USB buffer size exceeded.  " <<
-                "Increase value of USB_BUFFER_SIZE." << std::endl;
-        return false;
+    for (int i = 0; i < numBlocks; ++i) {
+        dataQueue.emplace(numDataStreams, SAMPLES_PER_DATA_BLOCK, dio32, &usbBuffer[0] + i * bs);
     }
-
-    if (usb3)
-    {
-        res = dev->ReadFromBlockPipeOut(PipeOutData, USB3_BLOCK_SIZE, numBytesToRead, usbBuffer);
-    }
-    else
-    {
-        res = dev->ReadFromPipeOut(PipeOutData, numBytesToRead, usbBuffer);
-    }
-    if (res == ok_Timeout)
-    {
-        std::cerr << "CRITICAL: Timeout on pipe read. Check block and buffer sizes." << std::endl;
-    }
-
-    dataBlock = new Rhd2000DataBlock(numDataStreams, usb3);
-    for (i = 0; i < numBlocks; ++i) {
-        dataBlock->fillFromUsbBuffer(usbBuffer, i, numDataStreams);
-        dataQueue.push(*dataBlock);
-    }
-    delete dataBlock;
 
     return true;
 }
 
-// Writes the contents of a data block queue (dataQueue) to a binary output stream (saveOut).
-// Returns the number of data blocks written.
-int Rhd2000EvalBoard::queueToFile(std::queue<Rhd2000DataBlock> &dataQueue, std::ofstream &saveOut)
-{
-    int count = 0;
-
-    while (!dataQueue.empty()) {
-        dataQueue.front().write(saveOut, getNumEnabledDataStreams());
-        dataQueue.pop();
-        ++count;
-    }
-
-    return count;
-}
 
 // Return name of Opal Kelly board based on model code.
-std::string Rhd2000EvalBoard::opalKellyModelName(int model) const
+string Rhd2000EvalBoard::opalKellyModelName(int model) const
 {
     switch (model) {
-    case OK_PRODUCT_XEM3001V1:
-        return("XEM3001V1");
-    case OK_PRODUCT_XEM3001V2:
-        return("XEM3001V2");
-    case OK_PRODUCT_XEM3010:
-        return("XEM3010");
-    case OK_PRODUCT_XEM3005:
-        return("XEM3005");
-    case OK_PRODUCT_XEM3001CL:
-        return("XEM3001CL");
-    case OK_PRODUCT_XEM3020:
-        return("XEM3020");
-    case OK_PRODUCT_XEM3050:
-        return("XEM3050");
-    case OK_PRODUCT_XEM9002:
-        return("XEM9002");
-    case OK_PRODUCT_XEM3001RB:
-        return("XEM3001RB");
-    case OK_PRODUCT_XEM5010:
-        return("XEM5010");
-    case OK_PRODUCT_XEM6110LX45:
-        return("XEM6110LX45");
-    case OK_PRODUCT_XEM6001:
-        return("XEM6001");
-    case OK_PRODUCT_XEM6010LX45:
-        return("XEM6010LX45");
-    case OK_PRODUCT_XEM6010LX150:
-        return("XEM6010LX150");
-    case OK_PRODUCT_XEM6110LX150:
-        return("XEM6110LX150");
-    case OK_PRODUCT_XEM6006LX9:
-        return("XEM6006LX9");
-    case OK_PRODUCT_XEM6006LX16:
-        return("XEM6006LX16");
-    case OK_PRODUCT_XEM6006LX25:
-        return("XEM6006LX25");
-    case OK_PRODUCT_XEM5010LX110:
-        return("XEM5010LX110");
-    case OK_PRODUCT_ZEM4310:
-        return("ZEM4310");
-    case OK_PRODUCT_XEM6310LX45:
-        return("XEM6310LX45");
-    case OK_PRODUCT_XEM6310LX150:
-        return("XEM6310LX150");
-    case OK_PRODUCT_XEM6110V2LX45:
-        return("XEM6110V2LX45");
-    case OK_PRODUCT_XEM6110V2LX150:
-        return("XEM6110V2LX150");
-    case OK_PRODUCT_XEM6002LX9:
-        return("XEM6002LX9");
-    case OK_PRODUCT_XEM6320LX130T:
-        return("XEM6320LX130T");
-    default:
-        return("UNKNOWN");
+    case OK_PRODUCT_XEM3001V1: return ("XEM3001V1");
+    case OK_PRODUCT_XEM3001V2: return ("XEM3001V2");
+    case OK_PRODUCT_XEM3010: return ("XEM3010");
+    case OK_PRODUCT_XEM3005: return ("XEM3005");
+    case OK_PRODUCT_XEM3001CL: return ("XEM3001CL");
+    case OK_PRODUCT_XEM3020: return ("XEM3020");
+    case OK_PRODUCT_XEM3050: return ("XEM3050");
+    case OK_PRODUCT_XEM9002: return ("XEM9002");
+    case OK_PRODUCT_XEM3001RB: return ("XEM3001RB");
+    case OK_PRODUCT_XEM5010: return ("XEM5010");
+    case OK_PRODUCT_XEM6110LX45: return ("XEM6110LX45");
+    case OK_PRODUCT_XEM6001: return ("XEM6001");
+    case OK_PRODUCT_XEM6010LX45: return ("XEM6010LX45");
+    case OK_PRODUCT_XEM6010LX150: return ("XEM6010LX150");
+    case OK_PRODUCT_XEM6110LX150: return ("XEM6110LX150");
+    case OK_PRODUCT_XEM6006LX9: return ("XEM6006LX9");
+    case OK_PRODUCT_XEM6006LX16: return ("XEM6006LX16");
+    case OK_PRODUCT_XEM6006LX25: return ("XEM6006LX25");
+    case OK_PRODUCT_XEM5010LX110: return ("XEM5010LX110");
+    case OK_PRODUCT_ZEM4310: return ("ZEM4310");
+    case OK_PRODUCT_XEM6310LX45: return ("XEM6310LX45");
+    case OK_PRODUCT_XEM6310LX150: return ("XEM6310LX150");
+    case OK_PRODUCT_XEM6110V2LX45: return ("XEM6110V2LX45");
+    case OK_PRODUCT_XEM6110V2LX150: return ("XEM6110V2LX150");
+    case OK_PRODUCT_XEM6002LX9: return ("XEM6002LX9");
+    case OK_PRODUCT_XEM6320LX130T: return ("XEM6320LX130T");
+    case OK_PRODUCT_XEM7310A75: return ("XEM7310A75");
+    default: return ("UNKNOWN");
     }
 }
 
 // Return 4-bit "board mode" input.
-int Rhd2000EvalBoard::getBoardMode() const
+int Rhd2000EvalBoard::getBoardMode()
 {
+    lock_guard<mutex> lockOk(okMutex);
     int mode;
 
     dev->UpdateWireOuts();
     mode = dev->GetWireOutValue(WireOutBoardMode);
 
-    std::cout << "Board mode: " << mode << std::endl << std::endl;
-
     return mode;
 }
 
+
 // Return FPGA cable delay for selected SPI port.
-int Rhd2000EvalBoard::getCableDelay(BoardPort port) const
+int Rhd2000EvalBoard::getCableDelay(SPIPort port) const
 {
-    switch (port) {
-    case PortA:
-        return cableDelay[0];
-    case PortB:
-        return cableDelay[1];
-    case PortC:
-        return cableDelay[2];
-    case PortD:
-        return cableDelay[3];
-    default:
-        std::cerr << "Error in RHD2000EvalBoard::getCableDelay: unknown port." << std::endl;
-        return -1;
-    }
+    if (port == SPIPort::All) return -1;
+    return cableDelay[static_cast<int>(port)];
 }
 
 // Return FPGA cable delays for all SPI ports.
 void Rhd2000EvalBoard::getCableDelay(std::vector<int> &delays) const
 {
-    if (delays.size() != 4) {
-        delays.resize(4);
+    if (delays.size() != MAX_NUM_SPI_PORTS) {
+        delays.resize(MAX_NUM_SPI_PORTS);
     }
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < MAX_NUM_SPI_PORTS; ++i) {
         delays[i] = cableDelay[i];
     }
 }
 
-// Uses the Opal Kelly library to reset the FPGA
-void Rhd2000EvalBoard::resetFpga()
+void Rhd2000EvalBoard::setAllDacsToZero()
 {
-    dev->ResetFPGA();
+    setDacManual(32768);  // midrange value = 0 V
+    for (int i = 0; i < 8; i++) {
+        selectDacDataStream(i, 32);
+    }
 }
 
-bool Rhd2000EvalBoard::isStreamEnabled(int streamIndex)
+// Selects an amplifier channel from a particular data stream to be subtracted from all DAC signals.
+void Rhd2000EvalBoard::setDacRerefSource(int stream, int channel)
 {
-  if (streamIndex < 0 || streamIndex > (MAX_NUM_DATA_STREAMS - 1))
-    return false;
+    lock_guard<mutex> lockOk(okMutex);
 
-  return dataStreamEnabled[streamIndex];
-}
+    if (stream < 0 || stream > (MAX_NUM_DATA_STREAMS - 1)) {
+        cerr << "Error in Rhd2000EvalBoard::setDacRerefSource: stream out of range." << endl;
+        return;
+    }
 
-void Rhd2000EvalBoard::enableBoardLeds(bool enable)
-{
-    dev->SetWireInValue(WireInMultiUse, enable ? 1 : 0);
+    if (channel < 0 || channel > 31) {
+        cerr << "Error in Rhd2000EvalBoard::setDacRerefSource: channel out of range." << endl;
+        return;
+    }
+
+    dev->SetWireInValue(WireInDacReref, (stream << 5) + channel, 0x0000003ff);
     dev->UpdateWireIns();
-    dev->ActivateTriggerIn(TrigInOpenEphys, 0);
 }
 
-// Ratio    divide_factor
-// 1        0
-// >=2      Ratio/2
-void Rhd2000EvalBoard::setClockDivider(int divide_factor)
+// Enables DAC rereferencing, where a selected amplifier channel is subtracted from all DACs in real
+// time.
+void Rhd2000EvalBoard::enableDacReref(bool enabled)
 {
+    lock_guard<mutex> lockOk(okMutex);
 
-    dev->SetWireInValue(WireInMultiUse, divide_factor);
+    dev->SetWireInValue(WireInDacReref, (enabled ? 0x00000400 : 0x00000000), 0x00000400);
     dev->UpdateWireIns();
-    dev->ActivateTriggerIn(TrigInOpenEphys, 1);
 }
 
-bool Rhd2000EvalBoard::isUSB3()
+namespace CabelDelayAlgorithms
 {
-    return usb3;
+/**
+ * @brief Find the delay by counting the number of valid delays for each stream
+ *        and choosing the first valid delay if number of valid delays is 1 or 2.
+ *        If number of valid delays is greater than 2, choose the second valid delay.
+ * @param scan_results Delays x Streams
+ * @return vector<int>  optimal delays for each stream
+ */
+vector<int> find_optimal_delays(const vector<vector<std::optional<IntanChip::Chip>>> &scan_results)
+{
+    std::cout << "--------------------------------------------------------\n";
+    for (int i = 0; i < scan_results.size(); i++) {
+        for (int j = 0; j < scan_results[i].size(); j++) {
+            if (scan_results[i][j]) {
+                std::cout << (int) scan_results[i][j]->id << "-";
+            } else {
+                std::cout << "NA-";
+            }
+        }
+        std::cout << "\n";
+    }
+    const int n_delays = scan_results.size();
+    const int n_streams = scan_results[0].size();
+    vector<int> optimal_delays(scan_results[0].size(), -1);
+    vector<int> second_valid_delays(scan_results[0].size(), -1);
+    for (int stream = 0; stream < n_streams; ++stream) {
+        int valid_delays = 0;
+        for (int delay = 0; delay < n_delays; ++delay) {
+            if (scan_results[delay][stream]) {
+                if (valid_delays == 0)
+                    optimal_delays[stream] = delay;
+                else if (valid_delays == 1)
+                    second_valid_delays[stream] = delay;
+                else if (valid_delays == 2)
+                    optimal_delays[stream] = second_valid_delays[stream];
+                else
+                    break;
+                ++valid_delays;
+            }
+        }
+    }
+    std::cout << "Optimal delays: ";
+    for (auto d : optimal_delays) std::cout << d << " ";
+    std::cout << std::endl;
+    return optimal_delays;
 }
+}  // namespace CabelDelayAlgorithms
 
-void Rhd2000EvalBoard::printFIFOmetrics()
+const std::vector<IntanChip::Chip> &Rhd2000EvalBoard::scan_chips()
 {
-    dev->UpdateWireOuts();
-    std::cout << "In FIFO: " << dev->GetWireOutValue(0x28) << " DDR: " << dev->GetWireOutValue(0x2a) << " Out FIFO: " << dev->GetWireOutValue(0x29) << std::endl;
+    for (int i = 0; i < ports.max_streams; ++i) enableDataStream(i, !ports.is_ddr(i));
+
+    // Read the Intan chip ID number from each RHD2000 chip found.
+    // Record delay settings that yield good communication with the chip.
+    vector<vector<optional<IntanChip::Chip>>> scan_results(16);
+    for (int delay = 0; delay < 16; ++delay) {
+        setCableDelay(Rhd2000EvalBoard::SPIPort::All, delay);
+        auto db = run_and_read_samples(SAMPLES_PER_DATA_BLOCK);
+        if (!db) throw runtime_error("Failed to read data block");
+        for (int stream = 0; stream < ports.max_non_ddr_streams; ++stream) {
+            scan_results[delay].push_back(
+                IntanChip::parse_device_id(&db->aux[2][stream * db->num_samples]));
+        }
+    }
+
+    std::vector<int> optimal_delays = CabelDelayAlgorithms::find_optimal_delays(scan_results);
+    int port_idx = 0;
+    std::vector<int> led;
+    for (auto s = optimal_delays.begin(); s != optimal_delays.end();
+         s += ports.max_non_ddr_streams_per_spi) {
+        int max_delay = *std::max_element(s, s + ports.max_non_ddr_streams_per_spi);
+        const auto spi = static_cast<Rhd2000EvalBoard::SPIPort>(port_idx);
+        setCableDelay(spi, max_delay);
+        led.push_back(max_delay > 0);
+    }
+    setSpiLedDisplay(&led[0]);
+
+    for (int i = 0; i < ports.max_chips; ++i) {
+        if (optimal_delays[i] == -1)
+            chips[i] = IntanChip::Chip();
+        else
+            chips[i] = *scan_results[optimal_delays[i]][i];
+    }
+    for (int i = 0; i < ports.max_streams; ++i) enableDataStream(i, false);
+    return chips;
 }

@@ -135,7 +135,7 @@ void ChannelList::update()
 
         maxChannels = hs->getNumActiveChannels() > maxChannels ? hs->getNumActiveChannels() : maxChannels;
 
-        Label* lbl = new Label(hs->getStreamPrefix(), hs->getStreamPrefix());
+        Label* lbl = new Label(hs->prefix, hs->prefix);
         lbl->setEditable(false);
         lbl->setBounds(10 + column * columnWidth, 40, columnWidth, 25);
         lbl->setJustificationType(juce::Justification::centred);

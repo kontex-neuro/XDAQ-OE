@@ -1,11 +1,11 @@
 //----------------------------------------------------------------------------------
-// rhd2000evalboard.h
+// rhd2000evalboardusb3.h
 //
-// Intan Technoloies RHD2000 Rhythm Interface API
+// Intan Technoloies RHD2000 USB3 Rhythm Interface API
 // Rhd2000EvalBoard Class Header File
-// Version 1.4 (26 February 2014)
+// Version 2.05 (24 July 2017)
 //
-// Copyright (c) 2013-2014 Intan Technologies LLC
+// Copyright (c) 2013-2017 Intan Technologies LLC
 //
 // This software is provided 'as-is', without any express or implied warranty.
 // In no event will the authors be held liable for any damages arising from the
@@ -17,126 +17,133 @@
 //
 // See http://www.intantech.com for documentation and product information.
 //----------------------------------------------------------------------------------
+#pragma once
 
-#ifndef RHD2000EVALBOARD_H
-#define RHD2000EVALBOARD_H
+#define RHYTHM_BOARD_ID 700
+#define MAX_NUM_DATA_STREAMS 32
+#define MAX_NUM_SPI_PORTS 8
+#define RHD_BOARD_MODE 13
 
-#define USB_BUFFER_SIZE 2560000
-#define RHYTHM_BOARD_ID_USB2 500
-#define RHYTHM_BOARD_ID_USB3 600
-#define MAX_NUM_DATA_STREAMS_USB2 8
-#define MAX_NUM_DATA_STREAMS_USB3 16
+// The maximum number of Rhd2000DataBlockUsb3 objects we will need is set by the need
+// to perform electrode impedance measurements at very low frequencies.
+// (Maximum command length = 1024 for one period; seven periods required in worst case.)
+#define MAX_NUM_BLOCKS 57
 
 #define FIFO_CAPACITY_WORDS 67108864
 
-//#define MAX_NUM_DATA_STREAMS(u3) ( u3 ? MAX_NUM_DATA_STREAMS_USB3 : MAX_NUM_DATA_STREAMS_USB2 )
-
 #define USB3_BLOCK_SIZE 1024
-#define DDR_BLOCK_SIZE 32
+#define RAM_BURST_SIZE 32
 
+#define MAX_DIO 32
+
+#ifdef UseMockOkFrontPanel
+#include "mock_okCFrontPanel.h"
+#endif
+
+#include <chrono>
+#include <cstdint>
+#include <mutex>
+#include <optional>
 #include <queue>
+#include <string>
 
-namespace OpalKellyLegacy
-{
-    class okCFrontPanel;
-}
-class Rhd2000DataBlock;
+#include "okFrontPanelDLL.h"
+#include "ports.h"
+#include "rhd2000datablock.h"
 
 class Rhd2000EvalBoard
 {
-
 public:
+    Ports ports = XDAQPortRHD();
     Rhd2000EvalBoard();
+
     ~Rhd2000EvalBoard();
 
-    int open(const char* libname); //patched to allow selecting path to dll
+    template <typename Unit>
+    static constexpr std::size_t fifo_capacity()
+    {
+        return (1u << 27) / sizeof(Unit);
+    }
+
+
+    int open(const char *libname);
     bool uploadFpgaBitfile(std::string filename);
     void initialize();
+    void set_dio32(bool dio32) { this->dio32 = dio32; }
+    bool get_dio32() const { return dio32; }
 
-    enum AmplifierSampleRate {
-        SampleRate1000Hz,
-        SampleRate1250Hz,
-        SampleRate1500Hz,
-        SampleRate2000Hz,
-        SampleRate2500Hz,
-        SampleRate3000Hz,
-        SampleRate3333Hz,
-        SampleRate4000Hz,
-        SampleRate5000Hz,
-        SampleRate6250Hz,
-        SampleRate8000Hz,
-        SampleRate10000Hz,
-        SampleRate12500Hz,
-        SampleRate15000Hz,
-        SampleRate20000Hz,
-        SampleRate25000Hz,
-        SampleRate30000Hz
+    int FPGA_board;
+    bool usb3;
+
+    enum class SampleRate {
+        s1000Hz,
+        s1250Hz,
+        s1500Hz,
+        s2000Hz,
+        s2500Hz,
+        s3000Hz,
+        s3333Hz,
+        s4000Hz,
+        s5000Hz,
+        s6250Hz,
+        s8000Hz,
+        s10000Hz,
+        s12500Hz,
+        s15000Hz,
+        s20000Hz,
+        s25000Hz,
+        s30000Hz
     };
 
-    bool setSampleRate(AmplifierSampleRate newSampleRate);
+    bool setSampleRate(SampleRate newSampleRate);
     double getSampleRate() const;
-    AmplifierSampleRate getSampleRateEnum() const;
+    SampleRate getSampleRateEnum() const;
 
-    enum AuxCmdSlot {
-        AuxCmd1,
-        AuxCmd2,
-        AuxCmd3
+    enum class AuxCmdSlot { All = -1, AuxCmd1 = 0, AuxCmd2 = 1, AuxCmd3 = 2 };
+
+    enum class SPIPort {
+        All = -1,
+        PortA = 0,
+        PortB = 1,
+        PortC = 2,
+        PortD = 3,
+        PortE = 4,
+        PortF = 5,
+        PortG = 6,
+        PortH = 7
     };
 
-    enum BoardPort {
-        PortA = 0,
+    enum HdmiPort {
+        PortA,
         PortB,
         PortC,
         PortD,
-        PortE,
-        PortF,
-        PortG,
-        PortH
     };
 
-    void uploadCommandList(const std::vector<int> &commandList, AuxCmdSlot auxCommandSlot, int bank);
-    void printCommandList(const std::vector<int> &commandList) const;
-    void selectAuxCommandBank(BoardPort port, AuxCmdSlot auxCommandSlot, int bank);
+    void uploadCommandList(const std::vector<uint32_t> &commandList, AuxCmdSlot auxCommandSlot,
+                           int bank);
+
+    void selectAuxCommandBank(SPIPort port, AuxCmdSlot auxCommandSlot, int bank);
     void selectAuxCommandLength(AuxCmdSlot auxCommandSlot, int loopIndex, int endIndex);
 
     void resetBoard();
+    void resetFpga();
     void setContinuousRunMode(bool continuousMode);
     void setMaxTimeStep(unsigned int maxTimeStep);
     void run();
-    bool isRunning() const;
-    unsigned int numWordsInFifo() const;
-    static unsigned int fifoCapacityInWords();
+    bool isRunning();
 
-    void setCableDelay(BoardPort port, int delay);
-    void setCableLengthMeters(BoardPort port, double lengthInMeters);
-    void setCableLengthFeet(BoardPort port, double lengthInFeet);
+    void setCableDelay(SPIPort port, int delay);
+    void setCableLengthMeters(SPIPort port, double lengthInMeters);
+    void setCableLengthFeet(SPIPort port, double lengthInFeet);
     double estimateCableLengthMeters(int delay) const;
     double estimateCableLengthFeet(int delay) const;
 
     void setDspSettle(bool enabled);
+    void setAllDacsToZero();
 
-    enum BoardDataSource {
-        PortA1 = 0,
-        PortA2 = 1,
-        PortB1 = 2,
-        PortB2 = 3,
-        PortC1 = 4,
-        PortC2 = 5,
-        PortD1 = 6,
-        PortD2 = 7,
-        PortA1Ddr = 8,
-        PortA2Ddr = 9,
-        PortB1Ddr = 10,
-        PortB2Ddr = 11,
-        PortC1Ddr = 12,
-        PortC2Ddr = 13,
-        PortD1Ddr = 14,
-        PortD2Ddr = 15
-    };
-
-    void setDataSource(int stream, BoardDataSource dataSource);
     void enableDataStream(int stream, bool enabled);
-    int getNumEnabledDataStreams() const;
+    int getNumEnabledDataStreams() const { return numDataStreams; }
 
     void clearTtlOut();
     void setTtlOut(int ttlOutArray[]);
@@ -145,114 +152,123 @@ public:
     void setDacManual(int value);
 
     void setLedDisplay(int ledArray[]);
+    void setSpiLedDisplay(int ledArray[]);
 
     void enableDac(int dacChannel, bool enabled);
     void setDacGain(int gain);
     void setAudioNoiseSuppress(int noiseSuppress);
     void selectDacDataStream(int dacChannel, int stream);
     void selectDacDataChannel(int dacChannel, int dataChannel);
+
+    /**
+     * @brief
+     * M = Max stream, 32 for RHD, 8 for RHS
+     * To enable the DAC, the enable bit must be set high.
+     * For each DAC, user may select an amplifier channel from a data stream (0 ~ M-1).
+     * If source is set to M, the DAC will be controlled directly by the host computer via
+     * WireInDacManual; the source_channel parameter is ignored in this case. XDAQ : When source
+     * stream is set to M+1, the DAC will controlled by user defined waveform uploaded via
+     * UploadWaveform.
+     *
+     * @param channel : DAC channel
+     * @param enable : true to enable DAC
+     * @param source_stream : 0 ~ M-1, M for manual, M+1 for user defined waveform
+     * @param source_channel : 0 ~ 31 when source_stream is 0 ~ M-1, ignored otherwise
+     */
+    void config_dac(int channel, bool enable, int source_stream, int source_channel);
     void enableExternalFastSettle(bool enable);
     void setExternalFastSettleChannel(int channel);
-    void enableExternalDigOut(BoardPort port, bool enable);
-    void setExternalDigOutChannel(BoardPort port, int channel);
+    void enableExternalDigOut(SPIPort port, bool enable);
+    void setExternalDigOutChannel(SPIPort port, int channel);
     void enableDacHighpassFilter(bool enable);
     void setDacHighpassFilter(double cutoff);
     void setDacThreshold(int dacChannel, int threshold, bool trigPolarity);
     void setTtlMode(int mode);
 
     void flush();
-    bool readDataBlock(Rhd2000DataBlock *dataBlock, int nSamples = -1);
-    bool readDataBlocks(int numBlocks, std::queue<Rhd2000DataBlock> &dataqueue);
-    int queueToFile(std::queue<Rhd2000DataBlock> &dataqueue, std::ofstream &saveOut);
-    int getBoardMode() const;
-    int getCableDelay(BoardPort port) const;
+
+    template <typename Unit>
+    std::size_t get_sample_size()
+    {
+        return sample_size<Unit>(numDataStreams, CHANNELS_PER_STREAM, dio32);
+    }
+
+    template <typename Unit>
+    std::size_t get_fifo_data_size(bool update)
+    {
+        return (update ? numWordsInFifo() : lastNumWordsInFifo) * 2 / sizeof(Unit);
+    }
+
+    int get_num_samples_available(bool update)
+    {
+        return get_fifo_data_size<char>(update) / get_sample_size<char>();
+    }
+
+    std::optional<Rhd2000DataBlock> run_and_read_samples(
+        int samples, std::optional<std::chrono::milliseconds> timeout = std::nullopt);
+    std::optional<Rhd2000DataBlock> read_samples(int samples);
+
+    int read_to_buffer(int samples, unsigned char *buffer);
+
+    bool readDataBlocks(int numBlocks, std::queue<Rhd2000DataBlock> &dataQueue);
+
+    int getBoardMode();
+    int getCableDelay(SPIPort port) const;
     void getCableDelay(std::vector<int> &delays) const;
 
-    //Additions by open-ephys
-    void resetFpga();
-    bool isStreamEnabled(int streamIndex);
-    void enableBoardLeds(bool enable);
-    void setClockDivider(int divide_factor);
-    bool isUSB3();
-    void printFIFOmetrics();
-    bool readRawDataBlock(unsigned char** bufferPtr, int nSamples = -1);
+    void setDacRerefSource(int stream, int channel);
+    void enableDacReref(bool enabled);
 
-    int MAX_NUM_DATA_STREAMS;
+    // kontexdev
+    void enable32bitDIO(bool enabled);
+    bool UploadDACData(const std::vector<uint16_t> &commandList, int dacChannel, int length);
+
+    enum class XDAQStatus : uint8_t {
+        MCU_IDLE = 0x0,
+        MCU_BUSY = 0x04,
+        MCU_DONE = 0x08,
+        MCU_ERROR = 0x10
+    };
+    XDAQStatus getXDAQStatus();
+    bool isStreamEnabled(int stream) const { return dataStreamEnabled[stream]; }
+    const std::vector<IntanChip::Chip> &scan_chips();
+    const std::vector<IntanChip::Chip> &get_chips() const { return chips; }
+    const std::vector<int> &get_cable_delays() const { return cableDelay; }
+    const float estimate_cable_length_meters(SPIPort port) const
+    {
+        return estimateCableLengthMeters(cableDelay[static_cast<int>(port)]);
+    }
 
 private:
-    OpalKellyLegacy::okCFrontPanel *dev;
-    AmplifierSampleRate sampleRate;
-    int numDataStreams; // total number of data streams currently enabled
-    int dataStreamEnabled[MAX_NUM_DATA_STREAMS_USB3]; // 0 (disabled) or 1 (enabled), set for maximum stream number
+#ifdef UseMockOkFrontPanel
+    MockOkCFrontPanel *dev;
+#else
+    okCFrontPanel *dev;
+#endif
+    const int samples_per_block = SAMPLES_PER_DATA_BLOCK;
+    long read_raw_samples(int samples, unsigned char *buffer);
+
+    bool is_open = false;
+
+    bool expander = false;
+
+    bool dio32;
+    SampleRate sampleRate = SampleRate::s30000Hz;
+    int numDataStreams = 0;  // total number of data streams currently enabled
+    int dataStreamEnabled[MAX_NUM_DATA_STREAMS] = {0};  // 0 (disabled) or 1 (enabled)
     std::vector<int> cableDelay;
+    std::vector<IntanChip::Chip> chips;
+
+    // Methods in this class are designed to be thread-safe.  This variable is used to ensure that.
+    std::mutex okMutex;
 
     // Buffer for reading bytes from USB interface
-    unsigned char usbBuffer[USB_BUFFER_SIZE];
-
-    // Opal Kelly module USB interface endpoint addresses
-    enum OkEndPoint {
-        WireInResetRun = 0x00,
-        WireInMaxTimeStepLsb = 0x01,
-        WireInMaxTimeStepMsb = 0x02,
-        WireInDataFreqPll = 0x03,
-        WireInMisoDelay = 0x04,
-        WireInCmdRamAddr = 0x05,
-        WireInCmdRamBank = 0x06,
-        WireInCmdRamData = 0x07,
-        WireInAuxCmdBank1 = 0x08,
-        WireInAuxCmdBank2 = 0x09,
-        WireInAuxCmdBank3 = 0x0a,
-        WireInAuxCmdLength1 = 0x0b,
-        WireInAuxCmdLength2 = 0x0c,
-        WireInAuxCmdLength3 = 0x0d,
-        WireInAuxCmdLoop1 = 0x0e,
-        WireInAuxCmdLoop2 = 0x0f,
-        WireInAuxCmdLoop3 = 0x10,
-        WireInLedDisplay = 0x11,
-        WireInDataStreamSel1234 = 0x12,
-        WireInDataStreamSel5678 = 0x13,
-        WireInDataStreamEn = 0x14,
-        WireInTtlOut = 0x15,
-        WireInDacSource1 = 0x16,
-        WireInDacSource2 = 0x17,
-        WireInDacSource3 = 0x18,
-        WireInDacSource4 = 0x19,
-        WireInDacSource5 = 0x1a,
-        WireInDacSource6 = 0x1b,
-        WireInDacSource7 = 0x1c,
-        WireInDacSource8 = 0x1d,
-        WireInDacManual = 0x1e,
-        WireInMultiUse = 0x1f,
-
-        TrigInDcmProg = 0x40,
-        TrigInSpiStart = 0x41,
-        TrigInRamWrite = 0x42,
-        TrigInDacThresh = 0x43,
-        TrigInDacHpf = 0x44,
-        TrigInExtFastSettle = 0x45,
-        TrigInExtDigOut = 0x46,
-        TrigInOpenEphys = 0x5a,
-
-        WireOutNumWordsLsb = 0x20,
-        WireOutNumWordsMsb = 0x21,
-        WireOutSpiRunning = 0x22,
-        WireOutTtlIn = 0x23,
-        WireOutDataClkLocked = 0x24,
-        WireOutBoardMode = 0x25,
-        WireOutBoardId = 0x3e,
-        WireOutBoardVersion = 0x3f,
-
-        PipeOutData = 0xa0
-    };
-
+    std::vector<unsigned char> usbBuffer;
     std::string opalKellyModelName(int model) const;
-    double getSystemClockFreq() const;
 
     bool isDcmProgDone() const;
     bool isDataClockLocked() const;
 
-    bool usb3; //Open-Ephys addition for USB3 support
-
+    unsigned int lastNumWordsInFifo = 0;
+    unsigned int numWordsInFifo();
 };
-
-#endif // RHD2000EVALBOARD_H

@@ -36,7 +36,7 @@ set(SOURCE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Source)
 file(GLOB_RECURSE SRC_FILES LIST_DIRECTORIES false "${SOURCE_PATH}/*.cpp" "${SOURCE_PATH}/*.h")
 set(GUI_COMMONLIB_DIR ${GUI_BASE_DIR}/installed_libs)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 
 set(CONFIGURATION_FOLDER $<$<CONFIG:Debug>:Debug>$<$<NOT:$<CONFIG:Debug>>:Release>)
 
@@ -49,6 +49,10 @@ else()
 endif()
 
 target_compile_features(${PLUGIN_NAME} PUBLIC cxx_auto_type cxx_generalized_initializers)
+
+# disable deprecation warnings -Wno-deprecated-declarations
+target_compile_options(${PLUGIN_NAME} PRIVATE -Wno-deprecated-declarations)
+
 target_include_directories(${PLUGIN_NAME} PUBLIC ${GUI_BASE_DIR}/JuceLibraryCode ${GUI_BASE_DIR}/JuceLibraryCode/modules ${GUI_BASE_DIR}/Plugins/Headers ${GUI_COMMONLIB_DIR}/include)
 
 set(GUI_BIN_DIR ${GUI_BASE_DIR}/Build/${CONFIGURATION_FOLDER})
@@ -105,6 +109,23 @@ elseif(LINUX)
 	target_link_libraries(${PLUGIN_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/Resources/libokFrontPanel.so")
 	install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/libokFrontPanel.so DESTINATION ${GUI_BIN_DIR}/shared)
 elseif(APPLE)
-	target_link_libraries(${PLUGIN_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/Resources/libokFrontPanel.dylib")
+	find_package(fmt)
+	# target_compile_definitions(${PLUGIN_NAME} PRIVATE UseMockOkFrontPanel=1)
+	# target_compile_options(${PLUGIN_NAME} PRIVATE -Wall)
+	target_link_libraries(${PLUGIN_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/Resources/libokFrontPanel.dylib" fmt::fmt-header-only)
 	install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/libokFrontPanel.dylib DESTINATION $ENV{HOME}/Library/Application\ Support/open-ephys/shared-api8)
 endif()
+
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/xdaq.bit DESTINATION ${GUI_BASE_DIR}/Build/open-ephys.app/Contents/Resources/shared)
+
+add_executable(testdb
+	Source/rhythm-api/rhd2000datablock.h
+	Source/rhythm-api/ports.h
+	Source/rhythm-api/utils.h
+	Source/rhythm-api/intan_chip.h
+	Source/t.cc)
+
+
+target_link_libraries(testdb
+	fmt::fmt-header-only
+)

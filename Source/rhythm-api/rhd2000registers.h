@@ -17,13 +17,12 @@
 //
 // See http://www.intantech.com for documentation and product information.
 //----------------------------------------------------------------------------------
-
-#ifndef RHD2000REGISTERS_H
-#define RHD2000REGISTERS_H
+#pragma once
+#include <cstdint>
+#include <vector>
 
 class Rhd2000Registers
 {
-
 public:
     Rhd2000Registers(double sampleRate);
 
@@ -47,16 +46,9 @@ public:
     void enableZcheck(bool enabled);
     void setZcheckDacPower(bool enabled);
 
-    enum ZcheckCs {
-        ZcheckCs100fF,
-        ZcheckCs1pF,
-        ZcheckCs10pF
-    };
+    enum ZcheckCs { ZcheckCs100fF, ZcheckCs1pF, ZcheckCs10pF };
 
-    enum ZcheckPolarity {
-        ZcheckPositiveInput,
-        ZcheckNegativeInput
-    };
+    enum ZcheckPolarity { ZcheckPositiveInput, ZcheckNegativeInput };
 
     void setZcheckScale(ZcheckCs scale);
     void setZcheckPolarity(ZcheckPolarity polarity);
@@ -71,10 +63,10 @@ public:
     double setUpperBandwidth(double upperBandwidth);
     double setLowerBandwidth(double lowerBandwidth);
 
-    int createCommandListRegisterConfig(std::vector<int> &commandList, bool calibrate);
-    int createCommandListTempSensor(std::vector<int> &commandList);
-    int createCommandListUpdateDigOut(std::vector<int> &commandList);
-    int createCommandListZcheckDac(std::vector<int> &commandList, double frequency, double amplitude);
+    std::vector<uint32_t> createCommandListRegisterConfig(bool calibrate);
+    std::vector<uint32_t> createCommandListTempSensor();
+    std::vector<uint32_t> createCommandListUpdateDigOut();
+    std::vector<uint32_t> createCommandListZcheckDac(double frequency, double amplitude);
 
     enum Rhd2000CommandType {
         Rhd2000CommandConvert,
@@ -84,9 +76,9 @@ public:
         Rhd2000CommandRegRead
     };
 
-    int createRhd2000Command(Rhd2000CommandType commandType);
-    int createRhd2000Command(Rhd2000CommandType commandType, int arg1);
-    int createRhd2000Command(Rhd2000CommandType commandType, int arg1, int arg2);
+    uint32_t createRhd2000Command(Rhd2000CommandType commandType);
+    uint32_t createRhd2000Command(Rhd2000CommandType commandType, int arg1);
+    uint32_t createRhd2000Command(Rhd2000CommandType commandType, int arg1, int arg2);
 
 private:
     double sampleRate;
@@ -129,7 +121,7 @@ private:
     int zcheckEn;
 
     // RHD2000 Register 6 variables
-    //int zcheckDac;     // handle Zcheck DAC waveform elsewhere
+    // int zcheckDac;     // handle Zcheck DAC waveform elsewhere
 
     // RHD2000 Register 7 variables
     int zcheckSelect;
@@ -159,8 +151,5 @@ private:
     double upperBandwidthFromRH2(double rH2) const;
     double lowerBandwidthFromRL(double rL) const;
 
-    static const int MaxCommandLength = 1024; // size of on-FPGA auxiliary command RAM banks
-
+    static const int MaxCommandLength = 1024;  // size of on-FPGA auxiliary command RAM banks
 };
-
-#endif // RHD2000REGISTERS_H

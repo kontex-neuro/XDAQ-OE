@@ -29,294 +29,258 @@
 namespace RhythmNode
 {
 
-	class HeadstageOptionsInterface;
-	class SampleRateInterface;
-	class BandwidthInterface;
-	class DSPInterface;
-	class AudioInterface;
-	class ClockDivideInterface;
-	class DeviceThread;
-	class ChannelCanvas;
+class HeadstageOptionsInterface;
+class SampleRateInterface;
+class BandwidthInterface;
+class DSPInterface;
+class AudioInterface;
+class ClockDivideInterface;
+class DeviceThread;
+class ChannelCanvas;
 
-	struct ImpedanceData;
+struct ImpedanceData;
 
-	class DeviceEditor : public VisualizerEditor, 
-						 public ComboBox::Listener, 
-						 public Button::Listener,
-					     public PopupChannelSelector::Listener
+class DeviceEditor : public VisualizerEditor,
+                     public ComboBox::Listener,
+                     public Button::Listener,
+                     public PopupChannelSelector::Listener
 
-	{
-	public:
+{
+public:
+    /** Constructor */
+    DeviceEditor(GenericProcessor *parentNode, DeviceThread *thread);
 
-		/** Constructor */
-		DeviceEditor(GenericProcessor* parentNode, DeviceThread* thread);
+    /** Destructor*/
+    ~DeviceEditor() {}
 
-		/** Destructor*/
-		~DeviceEditor() { }
+    /** Respond to combo box changes (e.g. sample rate)*/
+    void comboBoxChanged(ComboBox *comboBox) override;
 
-		/** Respond to combo box changes (e.g. sample rate)*/
-		void comboBoxChanged(ComboBox* comboBox);
+    /** Respond to button clicks*/
+    void buttonClicked(Button *button) override;
 
-		/** Respond to button clicks*/
-		void buttonClicked(Button* button);
+    /** Disable UI during acquisition*/
+    void startAcquisition() override;
 
-		/** Disable UI during acquisition*/
-		void startAcquisition();
+    /** Enable UI after acquisition is finished*/
+    void stopAcquisition() override;
 
-		/** Enable UI after acquisition is finished*/
-		void stopAcquisition();
+    /** Runs impedance test*/
+    void measureImpedance();
 
-		/** Runs impedance test*/
-		void measureImpedance();
+    /** Saves impedance data to a file*/
+    void saveImpedance(File &file);
 
-		/** Saves impedance data to a file*/
-		void saveImpedance(File& file);
+    /** Updates channel canvas*/
+    void updateSettings() override;
 
-		/** Updates channel canvas*/
-		void updateSettings();
+    /** Saves custom parameters */
+    void saveVisualizerEditorParameters(XmlElement *xml) override;
 
-		/** Saves custom parameters */
-		void saveVisualizerEditorParameters(XmlElement* xml) override;
+    /** Loads custom parameters*/
+    void loadVisualizerEditorParameters(XmlElement *xml) override;
 
-		/** Loads custom parameters*/
-		void loadVisualizerEditorParameters(XmlElement* xml) override;
+    /** Creates an interface with additional channel settings*/
+    Visualizer *createNewCanvas(void) override;
 
-		/** Creates an interface with additional channel settings*/
-		Visualizer* createNewCanvas(void);
+    /** Called by PopupChannelSelector */
+    void channelStateChanged(Array<int> newChannels) override;
 
-		/** Called by PopupChannelSelector */
-		void channelStateChanged(Array<int> newChannels) override;
+private:
+    OwnedArray<HeadstageOptionsInterface> headstageOptionsInterfaces;
+    OwnedArray<ElectrodeButton> electrodeButtons;
 
-	private:
+    ScopedPointer<SampleRateInterface> sampleRateInterface;
+    ScopedPointer<BandwidthInterface> bandwidthInterface;
+    ScopedPointer<DSPInterface> dspInterface;
 
-		OwnedArray<HeadstageOptionsInterface> headstageOptionsInterfaces;
-		OwnedArray<ElectrodeButton> electrodeButtons;
+    ScopedPointer<AudioInterface> audioInterface;
+    ScopedPointer<ClockDivideInterface> clockInterface;
 
-		ScopedPointer<SampleRateInterface> sampleRateInterface;
-		ScopedPointer<BandwidthInterface> bandwidthInterface;
-		ScopedPointer<DSPInterface> dspInterface;
+    ScopedPointer<UtilityButton> rescanButton, dacTTLButton;
+    ScopedPointer<UtilityButton> auxButton;
+    ScopedPointer<UtilityButton> adcButton;
+    ScopedPointer<UtilityButton> ledButton;
 
-		ScopedPointer<AudioInterface> audioInterface;
-		ScopedPointer<ClockDivideInterface> clockInterface;
+    ScopedPointer<UtilityButton> dspoffsetButton;
+    ScopedPointer<ComboBox> ttlSettleCombo, dacHPFcombo;
 
-		ScopedPointer<UtilityButton> rescanButton, dacTTLButton;
-		ScopedPointer<UtilityButton> auxButton;
-		ScopedPointer<UtilityButton> adcButton;
-		ScopedPointer<UtilityButton> ledButton;
+    ScopedPointer<Label> audioLabel, ttlSettleLabel, dacHPFlabel;
 
-		ScopedPointer<UtilityButton> dspoffsetButton;
-		ScopedPointer<ComboBox> ttlSettleCombo, dacHPFcombo;
+    bool saveImpedances, measureWhenRecording;
 
-		ScopedPointer<Label> audioLabel, ttlSettleLabel, dacHPFlabel;
+    DeviceThread *board;
+    ChannelCanvas *canvas;
 
-		bool saveImpedances, measureWhenRecording;
+    enum AudioChannel { LEFT = 0, RIGHT = 1 };
 
-		DeviceThread* board;
-		ChannelCanvas* canvas;
+    AudioChannel activeAudioChannel;
 
-		enum AudioChannel {
-			LEFT = 0,
-			RIGHT = 1
-		};
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DeviceEditor);
+};
 
-		AudioChannel activeAudioChannel;
+/**
 
-		JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DeviceEditor);
+    Holds buttons for headstages on one port.
 
-	};
+    If a 32-channel headstages is detected, it
+    allows the user to toggle between 16 and 32-channel mode
 
-	/** 
-	
-		Holds buttons for headstages on one port.
+*/
+class HeadstageOptionsInterface : public Component, public Button::Listener
+{
+public:
+    /** Constructor*/
+    HeadstageOptionsInterface(DeviceThread *, DeviceEditor *, int port_idx);
 
-		If a 32-channel headstages is detected, it 
-		allows the user to toggle between 16 and 32-channel mode
-		
-	*/
-	class HeadstageOptionsInterface : public Component,
-									  public Button::Listener
-	{
-	public:
+    /** Draw the options interface background */
+    void paint(Graphics &g);
 
-		/** Constructor*/
-		HeadstageOptionsInterface(DeviceThread*, DeviceEditor*, int hsNum);
+    /** Toggle between 16 and 32 ch */
+    void buttonClicked(Button *button);
 
-		/** Destructor */
-		~HeadstageOptionsInterface();
+    /** Refresh button state*/
+    void checkEnabledState();
 
-		/** Draw the options interface background */
-		void paint(Graphics& g);
+    /** Checks whether headstage is in 32- or 16-channel mode*/
+    bool is32Channel(int hsIndex);
 
-		/** Toggle between 16 and 32 ch */
-		void buttonClicked(Button* button);
+    /** Sets HS in 32- or 16-ch mode */
+    void set32Channel(int hsIndex, bool is32Channel);
 
-		/** Refresh button state*/
-		void checkEnabledState();
+private:
+    std::vector<int> headstage_ids;
+    std::vector<std::unique_ptr<UtilityButton>> hsButtons;
+    std::string name;
+    DeviceThread *board;
+    DeviceEditor *editor;
+};
 
-		/** Checks whether headstage is in 32- or 16-channel mode*/
-		bool is32Channel(int hsIndex);
 
-		/** Sets HS in 32- or 16-ch mode */
-		void set32Channel(int hsIndex, bool is32Channel);
+class BandwidthInterface : public Component, public Label::Listener
+{
+public:
+    BandwidthInterface(DeviceThread *, DeviceEditor *);
 
-	private:
+    void paint(Graphics &g);
+    void labelTextChanged(Label *te);
 
-		int hsNumber1, hsNumber2;
-		int channelsOnHs1, channelsOnHs2;
-		String name;
+    void setLowerBandwidth(double value);
+    void setUpperBandwidth(double value);
+    double getLowerBandwidth();
+    double getUpperBandwidth();
 
-		bool isEnabled;
+private:
+    String name;
 
-		DeviceThread* board;
-		DeviceEditor* editor;
+    String lastLowCutString, lastHighCutString;
 
-		ScopedPointer<UtilityButton> hsButton1;
-		ScopedPointer<UtilityButton> hsButton2;
+    DeviceThread *board;
+    DeviceEditor *editor;
 
-	};
+    ScopedPointer<Label> upperBandwidthSelection;
+    ScopedPointer<Label> lowerBandwidthSelection;
 
+    double actualUpperBandwidth;
+    double actualLowerBandwidth;
+};
 
-	class BandwidthInterface : public Component,
-		public Label::Listener
-	{
-	public:
-		BandwidthInterface(DeviceThread*, DeviceEditor*);
-		~BandwidthInterface();
+class DSPInterface : public Component, public Label::Listener
+{
+public:
+    DSPInterface(DeviceThread *, DeviceEditor *);
+    ~DSPInterface();
 
-		void paint(Graphics& g);
-		void labelTextChanged(Label* te);
+    void paint(Graphics &g);
+    void labelTextChanged(Label *te);
 
-		void setLowerBandwidth(double value);
-		void setUpperBandwidth(double value);
-		double getLowerBandwidth();
-		double getUpperBandwidth();
+    void setDspCutoffFreq(double value);
+    double getDspCutoffFreq();
 
-	private:
+private:
+    String name;
 
-		String name;
+    DeviceThread *board;
+    DeviceEditor *editor;
 
-		String lastLowCutString, lastHighCutString;
+    ScopedPointer<Label> dspOffsetSelection;
 
-		DeviceThread* board;
-		DeviceEditor* editor;
+    double actualDspCutoffFreq;
+};
 
-		ScopedPointer<Label> upperBandwidthSelection;
-		ScopedPointer<Label> lowerBandwidthSelection;
 
-		double actualUpperBandwidth;
-		double actualLowerBandwidth;
 
-	};
+class SampleRateInterface : public Component, public ComboBox::Listener
+{
+public:
+    SampleRateInterface(DeviceThread *, DeviceEditor *);
 
-	class DSPInterface : public Component,
-		public Label::Listener
-	{
-	public:
-		DSPInterface(DeviceThread*, DeviceEditor*);
-		~DSPInterface();
+    int getSelectedId();
+    void setSelectedId(int);
 
-		void paint(Graphics& g);
-		void labelTextChanged(Label* te);
+    String getText();
 
-		void setDspCutoffFreq(double value);
-		double getDspCutoffFreq();
+    void paint(Graphics &g);
+    void comboBoxChanged(ComboBox *cb);
 
-	private:
+private:
+    int sampleRate;
+    String name;
 
-		String name;
+    DeviceThread *board;
+    DeviceEditor *editor;
 
-		DeviceThread* board;
-		DeviceEditor* editor;
+    ScopedPointer<ComboBox> rateSelection;
+    StringArray sampleRateOptions;
+};
 
-		ScopedPointer<Label> dspOffsetSelection;
+class AudioInterface : public Component, public Label::Listener
+{
+public:
+    AudioInterface(DeviceThread *, DeviceEditor *);
+    ~AudioInterface();
 
-		double actualDspCutoffFreq;
+    void paint(Graphics &g);
+    void labelTextChanged(Label *te);
 
-	};
+    void setNoiseSlicerLevel(int value);
+    int getNoiseSlicerLevel();
 
+private:
+    String name;
 
+    String lastNoiseSlicerString;
+    String lastGainString;
 
-	class SampleRateInterface : public Component,
-		public ComboBox::Listener
-	{
-	public:
-		SampleRateInterface(DeviceThread*, DeviceEditor*);
-		~SampleRateInterface();
+    DeviceThread *board;
+    DeviceEditor *editor;
 
-		int getSelectedId();
-		void setSelectedId(int);
+    ScopedPointer<Label> noiseSlicerLevelSelection;
 
-		String getText();
+    int actualNoiseSlicerLevel;
+};
 
-		void paint(Graphics& g);
-		void comboBoxChanged(ComboBox* cb);
+class ClockDivideInterface : public Component, public Label::Listener
+{
+public:
+    ClockDivideInterface(DeviceThread *, DeviceEditor *);
 
-	private:
+    void paint(Graphics &g);
+    void labelTextChanged(Label *te);
 
-		int sampleRate;
-		String name;
+    void setClockDivideRatio(int value);
+    int getClockDivideRatio() const { return actualDivideRatio; };
 
-		DeviceThread* board;
-		DeviceEditor* editor;
+private:
+    String name;
+    String lastDivideRatioString;
 
-		ScopedPointer<ComboBox> rateSelection;
-		StringArray sampleRateOptions;
+    DeviceThread *board;
+    DeviceEditor *editor;
 
-	};
+    ScopedPointer<Label> divideRatioSelection;
+    int actualDivideRatio;
+};
 
-	class AudioInterface : public Component,
-		public Label::Listener
-	{
-	public:
-		AudioInterface(DeviceThread*, DeviceEditor*);
-		~AudioInterface();
-
-		void paint(Graphics& g);
-		void labelTextChanged(Label* te);
-
-		void setNoiseSlicerLevel(int value);
-		int getNoiseSlicerLevel();
-
-	private:
-
-		String name;
-
-		String lastNoiseSlicerString;
-		String lastGainString;
-
-		DeviceThread* board;
-		DeviceEditor* editor;
-
-		ScopedPointer<Label> noiseSlicerLevelSelection;
-
-		int actualNoiseSlicerLevel;
-
-	};
-
-	class ClockDivideInterface : public Component,
-		public Label::Listener
-	{
-	public:
-		ClockDivideInterface(DeviceThread*, DeviceEditor*);
-
-		void paint(Graphics& g);
-		void labelTextChanged(Label* te);
-
-		void setClockDivideRatio(int value);
-		int getClockDivideRatio() const { return actualDivideRatio; };
-
-	private:
-
-		String name;
-		String lastDivideRatioString;
-
-		DeviceThread * board;
-		DeviceEditor * editor;
-
-		ScopedPointer<Label> divideRatioSelection;
-		int actualDivideRatio;
-
-	};
-
-}
+}  // namespace RhythmNode
 #endif  // __DEVICEEDITOR_H_2AD3C591__

@@ -25,129 +25,79 @@
 
 using namespace RhythmNode;
 
-Headstage::Headstage(Rhd2000EvalBoard::BoardDataSource dataSource_, int MAX_H) :
-    dataSource(dataSource_),
-    MAX_NUM_HEADSTAGES(MAX_H),
-    numStreams(0), 
-    channelsPerStream(32), 
-    halfChannels(false),
-    streamIndex(-1),
-    firstChannelIndex(0),
-    namingScheme(GLOBAL_INDEX)
+Headstage::Headstage(std::string port, std::string prefix, int chip_idx, int max_streams)
+    : port(port),
+      max_streams(max_streams),
+      prefix(prefix),
+      channelsPerStream(32),
+      halfChannels(false),
+      streamIndex(-1),
+      firstChannelIndex(0),
+      namingScheme(GLOBAL_INDEX)
 {
-    StringArray stream_prefix = 
-    {   "A1", "A2", 
-        "B1", "B2",
-        "C1", "C2",
-        "D1", "D2",
-        "E1", "E2",
-        "F1", "F2",
-        "G1", "G2",
-        "H1", "H2"
-    };
-
-    prefix = stream_prefix[int(dataSource_)];
-}
-
-int Headstage::getNumStreams() const
-{
-    return numStreams;
 }
 
 void Headstage::setNumStreams(int num)
 {
-
     LOGD("Headstage ", prefix, " setting num streams to ", num);
 
-    if (num == 2)
-        halfChannels = false;
+    if (num == 2) halfChannels = false;
 
-    if (numStreams != num)
-    {
+    if (numStreams != num) {
         numStreams = num;
-        
+
         generateChannelNames();
     }
-    
 }
 
 void Headstage::setChannelsPerStream(int nchan)
 {
-
     LOGD("Headstage ", prefix, " setting channels per stream to ", nchan);
 
-    if (channelsPerStream != nchan)
-    {
+    if (channelsPerStream != nchan) {
         channelsPerStream = nchan;
 
         generateChannelNames();
     }
-    
 }
 
-void Headstage::setFirstStreamIndex(int streamIndex_)
-{
-    streamIndex = streamIndex_;
-}
+void Headstage::setFirstStreamIndex(int streamIndex_) { streamIndex = streamIndex_; }
 
 void Headstage::setFirstChannel(int channelIndex)
 {
-
     LOGD("Headstage ", prefix, " setting first channel to ", channelIndex);
 
-    if (firstChannelIndex != channelIndex)
-    {
+    if (firstChannelIndex != channelIndex) {
         firstChannelIndex = channelIndex;
 
-        if (namingScheme == GLOBAL_INDEX)
-            generateChannelNames();
+        if (namingScheme == GLOBAL_INDEX) generateChannelNames();
     }
 }
 
-int Headstage::getStreamIndex (int offset) const
-{
-    return streamIndex + offset;
-}
+int Headstage::getStreamIndex(int offset) const { return streamIndex + offset; }
 
-int Headstage::getNumChannels() const
-{
-    return channelsPerStream * numStreams;
-}
+int Headstage::getNumChannels() const { return channelsPerStream * numStreams; }
 
 void Headstage::setHalfChannels(bool half)
 {
+    if (getNumChannels() == 64) return;
 
-    if (getNumChannels() == 64)
-        return;
-
-    if (halfChannels != half)
-    {
+    if (halfChannels != half) {
         halfChannels = half;
 
         generateChannelNames();
     }
-    
 }
 
 int Headstage::getNumActiveChannels() const
 {
-    return (int)(getNumChannels() / (halfChannels ? 2 : 1));
+    return (int) (getNumChannels() / (halfChannels ? 2 : 1));
 }
 
-Rhd2000EvalBoard::BoardDataSource Headstage::getDataStream (int index) const
-{
-    if (index < 0 || index > 1) index = 0;
-        return static_cast<Rhd2000EvalBoard::BoardDataSource>(dataSource + MAX_NUM_HEADSTAGES * index);
-}
-
-bool Headstage::isConnected() const
-{
-    return (numStreams > 0);
-}
+bool Headstage::isConnected() const { return (numStreams > 0); }
 
 String Headstage::getChannelName(int ch) const
 {
-
     String name;
 
     if (ch > -1 && ch < channelNames.size())
@@ -155,70 +105,54 @@ String Headstage::getChannelName(int ch) const
     else
         name = " ";
 
-    if (ch == 0)
-      LOGD("Headstage ", prefix, " channel ", ch, " name: ", name);
+    if (ch == 0) LOGD("Headstage ", prefix, " channel ", ch, " name: ", name);
 
     return name;
 }
 
-String Headstage::getStreamPrefix() const
+void Headstage::setChannelName(std::string name, int ch)
 {
-    return prefix;
-}
-
-void Headstage::setChannelName(String name, int ch)
-{
-    if (ch > -1 && ch < channelNames.size())
-        channelNames.set(ch, name);
+    if (ch > -1 && ch < channelNames.size()) channelNames[ch] = name;
 }
 
 void Headstage::setNamingScheme(ChannelNamingScheme scheme)
 {
-    if (namingScheme != scheme)
-    {
+    if (namingScheme != scheme) {
         namingScheme = scheme;
 
         generateChannelNames();
     }
-    
 }
 
 void Headstage::generateChannelNames()
 {
     channelNames.clear();
 
-    switch (namingScheme)
-    {
+    switch (namingScheme) {
     case GLOBAL_INDEX:
-        for (int i = 0; i < getNumActiveChannels(); i++)
-        {
-            channelNames.add("CH" + String(firstChannelIndex + i + 1));
+        for (int i = 0; i < getNumActiveChannels(); i++) {
+            channelNames.push_back("CH" + std::to_string(firstChannelIndex + i + 1));
         }
         break;
     case STREAM_INDEX:
-        for (int i = 0; i < getNumActiveChannels(); i++)
-        {
-            channelNames.add(prefix + "_CH" + String(i + 1));
+        for (int i = 0; i < getNumActiveChannels(); i++) {
+            channelNames.push_back(prefix + "_CH" + std::to_string(i + 1));
         }
     }
 }
 
-void Headstage::setImpedances(Impedances& impedances)
+void Headstage::setImpedances(Impedances &impedances)
 {
-
     impedanceMagnitudes.clear();
     impedancePhases.clear();
 
-    for (int i = 0; i < impedances.streams.size(); i++)
-    {
-        if (impedances.streams[i] == streamIndex)
-        {
+    for (int i = 0; i < impedances.streams.size(); i++) {
+        if (impedances.streams[i] == streamIndex) {
             impedanceMagnitudes.add(impedances.magnitudes[i]);
             impedancePhases.add(impedances.phases[i]);
         }
 
-        if (numStreams == 2 && impedances.streams[i] == streamIndex + 1)
-        {
+        if (numStreams == 2 && impedances.streams[i] == streamIndex + 1) {
             impedanceMagnitudes.add(impedances.magnitudes[i]);
             impedancePhases.add(impedances.phases[i]);
         }
@@ -227,16 +161,14 @@ void Headstage::setImpedances(Impedances& impedances)
 
 float Headstage::getImpedanceMagnitude(int channel) const
 {
-    if (channel < impedanceMagnitudes.size())
-        return impedanceMagnitudes[channel];
+    if (channel < impedanceMagnitudes.size()) return impedanceMagnitudes[channel];
 
     return 0.0f;
 }
 
 float Headstage::getImpedancePhase(int channel) const
 {
-    if (channel < impedancePhases.size())
-        return impedancePhases[channel];
+    if (channel < impedancePhases.size()) return impedancePhases[channel];
 
     return 0.0f;
 }
