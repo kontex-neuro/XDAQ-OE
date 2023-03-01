@@ -119,9 +119,7 @@ void ChannelList::update()
     channelComponents.clear();
     impedanceButton->setEnabled(true);
 
-    const int columnWidth = 250;
-
-    Array<const Headstage*> headstages = board->getConnectedHeadstages();
+    const int columnWidth = 200;
 
     int column = -1;
 
@@ -129,13 +127,13 @@ void ChannelList::update()
 
     numberingScheme->setSelectedId(board->getNamingScheme(), dontSendNotification);
 
-    for (auto hs : headstages)
-    {
+    for (auto &hs : board->get_headstages()) {
+        if (!hs.isConnected()) continue;
         column++;
 
-        maxChannels = hs->getNumActiveChannels() > maxChannels ? hs->getNumActiveChannels() : maxChannels;
+        maxChannels = std::max(hs.getNumActiveChannels() , maxChannels);
 
-        Label* lbl = new Label(hs->prefix, hs->prefix);
+        Label* lbl = new Label(hs.prefix, hs.prefix);
         lbl->setEditable(false);
         lbl->setBounds(10 + column * columnWidth, 40, columnWidth, 25);
         lbl->setJustificationType(juce::Justification::centred);
@@ -143,24 +141,37 @@ void ChannelList::update()
         staticLabels.add(lbl);
         addAndMakeVisible(lbl);
 
-        for (int ch = 0; ch < hs->getNumActiveChannels(); ch++)
+        auto ohm = new Label(hs.prefix + "ohm", "Ohm");
+        ohm->setEditable(false);
+        ohm->setBounds(110 + column * columnWidth, 60, columnWidth, 22);
+        ohm->setColour(Label::textColourId, juce::Colours::white);
+        staticLabels.add(ohm);
+        addAndMakeVisible(ohm);
+
+        auto deg = new Label(hs.prefix + "deg", "Deg");
+        deg->setEditable(false);
+        deg->setBounds(160 + column * columnWidth, 60, columnWidth, 22);
+        deg->setColour(Label::textColourId, juce::Colours::white);
+        staticLabels.add(deg);
+        addAndMakeVisible(deg);
+
+        for (int ch = 0; ch < hs.getNumActiveChannels(); ch++)
         {
             ChannelComponent* comp =
                 new ChannelComponent(
                     this,
                     ch,
                     0,
-                    hs->getChannelName(ch),
+                    hs.getChannelName(ch),
                     gains,
                     ContinuousChannel::ELECTRODE);
 
-            comp->setBounds(10 + column * columnWidth, 70 + ch * 22, columnWidth, 22);
-
-            if (hs->hasImpedanceData())
+            comp->setBounds(10 + column * columnWidth, 80 + ch * 22, columnWidth, 22);
+            if (hs.hasImpedanceData())
             {
                 comp->setImpedanceValues(
-                    hs->getImpedanceMagnitude(ch),
-                    hs->getImpedancePhase(ch));
+                    hs.getImpedanceMagnitude(ch),
+                    hs.getImpedancePhase(ch));
             }
             //comp->setUserDefinedData(k);
             channelComponents.add(comp);

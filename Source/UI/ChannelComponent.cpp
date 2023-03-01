@@ -22,58 +22,48 @@
 */
 
 #include "ChannelComponent.h"
+
+#include <fmt/format.h>
+
 #include "ChannelList.h"
 
 using namespace RhythmNode;
 
-ChannelComponent::ChannelComponent(ChannelList* cl, 
-                                   int ch, 
-                                   int gainIndex_, 
-                                   String name_, 
-                                   Array<float> gains_, 
-                                   ContinuousChannel::Type type_) :
-    type(type_), 
-    gains(gains_), 
-    channelList(cl), 
-    channel(ch), 
-    name(name_), 
-    gainIndex(gainIndex_)
+ChannelComponent::ChannelComponent(ChannelList *cl, int ch, int gainIndex_, String name_,
+                                   Array<float> gains_, ContinuousChannel::Type type_)
+    : type(type_), gains(gains_), channelList(cl), channel(ch), name(name_), gainIndex(gainIndex_)
 {
     Font f = Font("Small Text", 13, Font::plain);
 
-    staticLabel = new Label("Channel","Channel");
+    staticLabel = new Label("Channel", "Channel");
     staticLabel->setFont(f);
     staticLabel->setEditable(false);
     addAndMakeVisible(staticLabel);
 
-    editName = new Label(name,name);
+    editName = new Label(name, name);
     editName->setFont(f);
     editName->setEditable(false);
-    editName->setColour(Label::backgroundColourId,juce::Colours::lightgrey);
+    editName->setColour(Label::backgroundColourId, juce::Colours::lightgrey);
     editName->addListener(this);
     addAndMakeVisible(editName);
 
-    if (type == ContinuousChannel::ELECTRODE)
-    {
-        impedance = new Label("Impedance","? Ohm");
+    if (type == ContinuousChannel::ELECTRODE) {
+        impedance = new Label("Impedance", "? Ohm");
         impedance->setFont(Font("Default", 13, Font::plain));
         impedance->setEditable(false);
         addAndMakeVisible(impedance);
-    }
-    else if (type == ContinuousChannel::ADC)
-    {
+    } else if (type == ContinuousChannel::ADC) {
         impedance = nullptr;
         rangeComboBox = new ComboBox("ADC Ranges");
-        rangeComboBox->addItem("-5V - +5V",1);
-        rangeComboBox->addItem("0V - +5V",2);
-       //SourceNode* proc = channelList->proc;
-       // RHD2000Thread* thread = static_cast<RHD2000Thread*>(proc->getThread());
-       // rangeComboBox->setSelectedId(thread->getAdcRange(proc->getDataChannel(channel)->getSourceTypeIndex()) + 1, dontSendNotification);
+        rangeComboBox->addItem("-5V - +5V", 1);
+        rangeComboBox->addItem("0V - +5V", 2);
+        // SourceNode* proc = channelList->proc;
+        //  RHD2000Thread* thread = static_cast<RHD2000Thread*>(proc->getThread());
+        //  rangeComboBox->setSelectedId(thread->getAdcRange(proc->getDataChannel(channel)->getSourceTypeIndex())
+        //  + 1, dontSendNotification);
         rangeComboBox->addListener(this);
         addAndMakeVisible(rangeComboBox);
-    }
-    else
-    {
+    } else {
         impedance = nullptr;
         rangeComboBox = nullptr;
     }
@@ -81,70 +71,53 @@ ChannelComponent::ChannelComponent(ChannelList* cl,
 
 void ChannelComponent::setImpedanceValues(float mag, float phase)
 {
-    if (impedance != nullptr)
-    {
-        if (mag > 10000)
-            impedance->setText(String(mag/1e6,2)+" MOhm, "+String((int)phase) + " deg",juce::NotificationType::dontSendNotification);
-        else if (mag > 1000)
-            impedance->setText(String(mag/1e3,0)+" kOhm, "+String((int)phase) + " deg" ,juce::NotificationType::dontSendNotification);
-        else
-            impedance->setText(String(mag,0)+" Ohm, "+String((int)phase) + " deg" ,juce::NotificationType::dontSendNotification);
-    }
-    else
-    {
+    if (impedance == nullptr) return;
 
+    const char *unit = "";
+    if (mag > 10000) {
+        mag /= 1e6;
+        unit = "M";
+    } else if (mag > 1000) {
+        mag /= 1e3;
+        unit = "K";
     }
+    impedance->setText(fmt::format("{:6.2f}{}, {:4.0f}", mag, unit, phase),
+                       juce::NotificationType::dontSendNotification);
 }
 
-void ChannelComponent::comboBoxChanged(ComboBox* comboBox)
+void ChannelComponent::comboBoxChanged(ComboBox *comboBox)
 {
-    if (comboBox == rangeComboBox)
-    {
-       // SourceNode* proc = channelList->proc;
-       // RHD2000Thread* thread = static_cast<RHD2000Thread*>(proc->getThread());
-       // thread->setAdcRange(proc->getDataChannel(channel)->getSourceTypeIndex(), comboBox->getSelectedId() - 1);
+    if (comboBox == rangeComboBox) {
+        // SourceNode* proc = channelList->proc;
+        // RHD2000Thread* thread = static_cast<RHD2000Thread*>(proc->getThread());
+        // thread->setAdcRange(proc->getDataChannel(channel)->getSourceTypeIndex(),
+        // comboBox->getSelectedId() - 1);
     }
 }
-void ChannelComponent::labelTextChanged(Label* lbl)
+void ChannelComponent::labelTextChanged(Label *lbl)
 {
     // channel name change
     String newName = lbl->getText();
     channelList->setNewName(channel, newName);
 }
 
-void ChannelComponent::disableEdit()
-{
-    editName->setEnabled(false);
-}
+void ChannelComponent::disableEdit() { editName->setEnabled(false); }
 
-void ChannelComponent::enableEdit()
-{
-    editName->setEnabled(true);
-}
+void ChannelComponent::enableEdit() { editName->setEnabled(true); }
 
-void ChannelComponent::buttonClicked(Button* btn)
-{
-}
+void ChannelComponent::buttonClicked(Button *btn) {}
 
-void ChannelComponent::setUserDefinedData(int d)
-{
-}
+void ChannelComponent::setUserDefinedData(int d) {}
 
-int ChannelComponent::getUserDefinedData()
-{
-    return 0;
-}
+int ChannelComponent::getUserDefinedData() { return 0; }
 
 void ChannelComponent::resized()
 {
-    editName->setBounds(0,0,90,20);
-    if (rangeComboBox != nullptr)
-    {
-        rangeComboBox->setBounds(100,0,80,20);
+    editName->setBounds(0, 0, 90, 20);
+    if (rangeComboBox != nullptr) {
+        rangeComboBox->setBounds(100, 0, 80, 20);
     }
-    if (impedance != nullptr)
-    {
+    if (impedance != nullptr) {
         impedance->setBounds(100, 0, 130, 20);
     }
-
 }

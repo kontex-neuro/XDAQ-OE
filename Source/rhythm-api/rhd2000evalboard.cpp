@@ -196,11 +196,12 @@ bool Rhd2000EvalBoard::UploadDACData(const vector<uint16_t> &commandList, int da
 }
 
 
-void Rhd2000EvalBoard::enable32bitDIO(bool enabled)
+bool Rhd2000EvalBoard::set_dio32(bool dio32)
 {
     lock_guard<mutex> lockOk(okMutex);
-    dev->SetWireInValue(Enable32bitDIO, enabled * 0x04, 0x04);
-    dev->UpdateWireIns();
+    set_wire_in<true>(dev, Enable32bitDIO, dio32 * 0x04, 0x04);
+    this->dio32 = dio32;
+    return dio32;
 }
 
 
@@ -1484,6 +1485,26 @@ void Rhd2000EvalBoard::enableDacReref(bool enabled)
     dev->UpdateWireIns();
 }
 
+template <typename OS>
+void print_delay_results(OS &os, const vector<vector<std::optional<IntanChip::Chip>>> &scan_results,
+                         const vector<int> &optimal_delays)
+{
+    for (int i = 0; i < scan_results.size(); i++) {
+        os << fmt::format("Delay {:2d}: ", i);
+        for (int j = 0; j < scan_results[i].size(); j++) {
+            if (scan_results[i][j]) {
+                os << fmt::format("{:2d};", (int) scan_results[i][j]->id);
+            } else {
+                os << "NA;";
+            }
+        }
+        os << "\n";
+    }
+    os << "Optimal : ";
+    for (auto d : optimal_delays) os << fmt::format("{:2d};", d);
+    os << '\n';
+}
+
 namespace CabelDelayAlgorithms
 {
 /**
@@ -1495,17 +1516,6 @@ namespace CabelDelayAlgorithms
  */
 vector<int> find_optimal_delays(const vector<vector<std::optional<IntanChip::Chip>>> &scan_results)
 {
-    std::cout << "--------------------------------------------------------\n";
-    for (int i = 0; i < scan_results.size(); i++) {
-        for (int j = 0; j < scan_results[i].size(); j++) {
-            if (scan_results[i][j]) {
-                std::cout << (int) scan_results[i][j]->id << "-";
-            } else {
-                std::cout << "NA-";
-            }
-        }
-        std::cout << "\n";
-    }
     const int n_delays = scan_results.size();
     const int n_streams = scan_results[0].size();
     vector<int> optimal_delays(scan_results[0].size(), -1);
@@ -1526,15 +1536,50 @@ vector<int> find_optimal_delays(const vector<vector<std::optional<IntanChip::Chi
             }
         }
     }
-    std::cout << "Optimal delays: ";
-    for (auto d : optimal_delays) std::cout << d << " ";
-    std::cout << std::endl;
+    return optimal_delays;
+}
+
+/**
+ * @brief Find the delay by counting the number of valid delays for each stream
+ *        and choosing the first valid delay.
+ * @param scan_results Delays x Streams
+ * @return vector<int>  optimal delays for each stream
+ */
+vector<int> find_optimal_delays_greedy(
+    const vector<vector<std::optional<IntanChip::Chip>>> &scan_results)
+{
+    const int n_delays = scan_results.size();
+    const int n_streams = scan_results[0].size();
+    vector<int> optimal_delays(scan_results[0].size(), -1);
+    for (int stream = 0; stream < n_streams; ++stream) {
+        for (int delay = 0; delay < n_delays; ++delay) {
+            if (scan_results[delay][stream]) {
+                optimal_delays[stream] = delay;
+                break;
+            }
+        }
+    }
     return optimal_delays;
 }
 }  // namespace CabelDelayAlgorithms
 
 const std::vector<IntanChip::Chip> &Rhd2000EvalBoard::scan_chips()
 {
+    if (false) {
+        for (int i = 0; i < ports.max_streams; ++i) enableDataStream(i, true);
+        for (int i = 0; i < ports.max_chips; ++i) {
+            if (i != 8 && i != 9) {
+                chips[i].id = IntanChip::ChipID::RHD2164;
+                chips[i].miso = i % 2 == 0 ? IntanChip::ChipMISO::A : IntanChip::ChipMISO::B;
+            } else {
+                chips[i].id = IntanChip::ChipID::RHD2132;
+                chips[i].miso = IntanChip::ChipMISO::NA;
+            }
+        }
+        setCableDelay(Rhd2000EvalBoard::SPIPort::All, 1);
+
+        return chips;
+    }
     for (int i = 0; i < ports.max_streams; ++i) enableDataStream(i, !ports.is_ddr(i));
 
     // Read the Intan chip ID number from each RHD2000 chip found.
@@ -1550,13 +1595,14 @@ const std::vector<IntanChip::Chip> &Rhd2000EvalBoard::scan_chips()
         }
     }
 
-    std::vector<int> optimal_delays = CabelDelayAlgorithms::find_optimal_delays(scan_results);
+    std::vector<int> optimal_delays =
+        CabelDelayAlgorithms::find_optimal_delays_greedy(scan_results);
     int port_idx = 0;
     std::vector<int> led;
     for (auto s = optimal_delays.begin(); s != optimal_delays.end();
          s += ports.max_non_ddr_streams_per_spi) {
         int max_delay = *std::max_element(s, s + ports.max_non_ddr_streams_per_spi);
-        const auto spi = static_cast<Rhd2000EvalBoard::SPIPort>(port_idx);
+        const auto spi = static_cast<Rhd2000EvalBoard::SPIPort>(port_idx++);
         setCableDelay(spi, max_delay);
         led.push_back(max_delay > 0);
     }
@@ -1569,5 +1615,6 @@ const std::vector<IntanChip::Chip> &Rhd2000EvalBoard::scan_chips()
             chips[i] = *scan_results[optimal_delays[i]][i];
     }
     for (int i = 0; i < ports.max_streams; ++i) enableDataStream(i, false);
+    // print_delay_results(std::cout, scan_results, optimal_delays);
     return chips;
 }

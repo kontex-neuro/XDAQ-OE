@@ -21,9 +21,9 @@
 
 */
 
-#ifndef __DEVICEEDITOR_H_2AD3C591__
-#define __DEVICEEDITOR_H_2AD3C591__
+#pragma once
 
+#include<memory>
 #include <VisualizerEditorHeaders.h>
 
 namespace RhythmNode
@@ -100,7 +100,7 @@ private:
     ScopedPointer<UtilityButton> rescanButton, dacTTLButton;
     ScopedPointer<UtilityButton> auxButton;
     ScopedPointer<UtilityButton> adcButton;
-    ScopedPointer<UtilityButton> ledButton;
+    std::unique_ptr<UtilityButton> dio32_button;
 
     ScopedPointer<UtilityButton> dspoffsetButton;
     ScopedPointer<ComboBox> ttlSettleCombo, dacHPFcombo;
@@ -283,4 +283,3 @@ private:
 };
 
 }  // namespace RhythmNode
-#endif  // __DEVICEEDITOR_H_2AD3C591__

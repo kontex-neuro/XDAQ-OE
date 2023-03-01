@@ -77,8 +77,10 @@ DeviceThread::DeviceThread(SourceNode *sn, BoardType boardType_)
     for (int i = 0; i < 8; i++) adcRangeSettings[i] = 0;
 
     for (int i = 0; i < evalBoard->ports.max_chips; i++) {
-        headstages.emplace_back("Port " + std::to_string(evalBoard->ports.port_from_chip(i)),
-                                "H" + std::to_string(i), i, evalBoard->ports.max_streams_per_chip);
+        headstages.emplace_back("Port " + std::to_string(evalBoard->ports.port_from_chip(i) + 1),
+                                fmt::format("P{}-{}", evalBoard->ports.port_from_chip(i) + 1,
+                                            i % evalBoard->ports.max_chips_per_port + 1),
+                                evalBoard->ports.max_streams_per_chip);
     }
 
     sourceBuffers.add(new DataBuffer(2, 10000));  // start with 2 channels and automatically resize
@@ -105,7 +107,7 @@ DeviceThread::DeviceThread(SourceNode *sn, BoardType boardType_)
             dacChannelsToUpdate[k] = true;
             dacStream[k] = 0;
             setDACthreshold(k, 65534);
-            dacChannels[k] = 0;
+            dacChannels[k] = -1;
             dacThresholds[k] = 0;
         }
     }
@@ -198,19 +200,16 @@ void DeviceThread::setDACthreshold(int dacOutput, float threshold)
 
 void DeviceThread::setDACchannel(int dacOutput, int channel)
 {
-    if (channel < getNumDataOutputs(ContinuousChannel::ELECTRODE)) {
-        int channelCount = 0;
-        for (int i = 0; i < evalBoard->getNumEnabledDataStreams(); i++) {
-            if (channel < channelCount + numChannelsPerDataStream[i]) {
-                dacChannels[dacOutput] = channel - channelCount;
-                dacStream[dacOutput] = i;
-                break;
-            } else {
-                channelCount += numChannelsPerDataStream[i];
-            }
-        }
+    if (channel >= getNumDataOutputs(ContinuousChannel::ELECTRODE)) return;
+    int channels = 0;
+    for (int s = 0; s < evalBoard->ports.max_streams; ++s, channels += CHANNELS_PER_STREAM) {
+        if (!evalBoard->isStreamEnabled(s)) continue;
+        if (channel >= channels + CHANNELS_PER_STREAM) continue;
+        dacChannels[dacOutput] = channel - channels;
+        dacStream[dacOutput] = s;
         dacChannelsToUpdate[dacOutput] = true;
         updateSettingsDuringAcquisition = true;
+        return;
     }
 }
 
@@ -323,9 +322,6 @@ void DeviceThread::initializeBoard()
     bitfilename = executableDirectory + File::getSeparatorString() + "shared" +
                   File::getSeparatorString() + "xdaq.bit";
 
-    std::cout << boardType << '\n';
-    std::cout << bitfilename << '\n';
-
     if (!uploadBitfile(bitfilename)) {
         return;
     }
@@ -398,15 +394,19 @@ void DeviceThread::scanPorts()
 
     evalBoard->scan_chips();
 
+    int channels_enabled = 0;
     for (int i = 0; i < headstages.size(); ++i) {
         const auto &chip = evalBoard->get_chips()[i];
+        headstages[i].setFirstChannel(channels_enabled);
         if (chip.id == IntanChip::ChipID::NA) {
             headstages[i].setNumStreams(0);
         } else {
             headstages[i].setNumStreams((chip.id == IntanChip::ChipID::RHD2164) ? 2 : 1);
             evalBoard->enableDataStream(i * evalBoard->ports.max_streams_per_chip, true);
+            channels_enabled += CHANNELS_PER_STREAM;
             if (chip.id == IntanChip::ChipID::RHD2164) {
                 evalBoard->enableDataStream(i * evalBoard->ports.max_streams_per_chip + 1, true);
+                channels_enabled += CHANNELS_PER_STREAM;
             }
         }
     }
@@ -482,7 +482,7 @@ void DeviceThread::updateSettings(OwnedArray<ContinuousChannel> *continuousChann
                 continuousChannels->add(new ContinuousChannel(channelSettings));
                 continuousChannels->getLast()->setUnits("uV");
 
-                if (impedances.valid) {
+                if (impedances) {
                     continuousChannels->getLast()->impedance.magnitude =
                         headstage.getImpedanceMagnitude(ch);
                     continuousChannels->getLast()->impedance.phase =
@@ -531,51 +531,59 @@ void DeviceThread::updateSettings(OwnedArray<ContinuousChannel> *continuousChann
                                     "Events on digital input lines of a Rhythm FPGA device",
                                     "rhythm-fpga-device.events",
                                     stream,
-                                    8};
+                                    32};
 
     eventChannels->add(new EventChannel(settings));
 }
 
-void DeviceThread::impedanceMeasurementFinished()
+void DeviceThread::update_impedances(std::optional<Impedances> impedances)
 {
-    if (impedances.valid) {
-        LOGD("Updating headstage impedance values");
-
-        for (auto &hs : headstages) {
-            if (hs.isConnected()) {
-                hs.setImpedances(impedances);
-            }
+    this->impedances = impedances;
+    if (!impedances) return;
+    LOGD("Updating headstage impedance values");
+    for (int i = 0; i < impedances->stream_indices.size(); ++i) {
+        const int chipidx = impedances->stream_indices[i] / evalBoard->ports.max_streams_per_chip;
+        auto chip = evalBoard->get_chips()[chipidx];
+        auto &hs = headstages[chipidx];
+        auto mag = impedances->magnitudes_by_stream[i];
+        auto phase = impedances->phases_by_stream[i];
+        if (evalBoard->ports.is_ddr(impedances->stream_indices[i])) continue;
+        if (chip.id == IntanChip::ChipID::RHD2164) {
+            const auto &mag2 = impedances->magnitudes_by_stream[i + 1];
+            mag.insert(mag.end(), mag2.begin(), mag2.end());
+            const auto &phase2 = impedances->phases_by_stream[i + 1];
+            phase.insert(phase.end(), phase2.begin(), phase2.end());
         }
+        hs.setImpedances(std::move(mag), std::move(phase));
     }
 }
 
 void DeviceThread::saveImpedances(File &file)
 {
-    if (impedances.valid) {
-        auto xml = std::unique_ptr<XmlElement>(new XmlElement("IMPEDANCES"));
+    if (!impedances) return;
+    auto xml = std::unique_ptr<XmlElement>(new XmlElement("IMPEDANCES"));
 
-        int globalChannelNumber = -1;
+    int globalChannelNumber = -1;
 
-        for (auto &hs : headstages) {
-            XmlElement *headstageXml = new XmlElement("HEADSTAGE");
-            headstageXml->setAttribute("name", hs.prefix);
+    for (auto &hs : headstages) {
+        XmlElement *headstageXml = new XmlElement("HEADSTAGE");
+        headstageXml->setAttribute("name", hs.prefix);
 
-            for (int ch = 0; ch < hs.getNumActiveChannels(); ch++) {
-                globalChannelNumber++;
+        for (int ch = 0; ch < hs.getNumActiveChannels(); ch++) {
+            globalChannelNumber++;
 
-                XmlElement *channelXml = new XmlElement("CHANNEL");
-                channelXml->setAttribute("name", hs.getChannelName(ch));
-                channelXml->setAttribute("number", globalChannelNumber);
-                channelXml->setAttribute("magnitude", hs.getImpedanceMagnitude(ch));
-                channelXml->setAttribute("phase", hs.getImpedancePhase(ch));
-                headstageXml->addChildElement(channelXml);
-            }
-
-            xml->addChildElement(headstageXml);
+            XmlElement *channelXml = new XmlElement("CHANNEL");
+            channelXml->setAttribute("name", hs.getChannelName(ch));
+            channelXml->setAttribute("number", globalChannelNumber);
+            channelXml->setAttribute("magnitude", hs.getImpedanceMagnitude(ch));
+            channelXml->setAttribute("phase", hs.getImpedancePhase(ch));
+            headstageXml->addChildElement(channelXml);
         }
 
-        xml->writeTo(file);
+        xml->addChildElement(headstageXml);
     }
+
+    xml->writeTo(file);
 }
 
 String DeviceThread::getChannelName(int i) const { return channelNames[i]; }
@@ -641,7 +649,6 @@ int DeviceThread::getNumDataOutputs(ContinuousChannel::Type type)
     return 0;
 }
 
-
 float DeviceThread::getAdcBitVolts(int chan) const
 {
     if (chan < adcBitVolts.size()) {
@@ -666,7 +673,6 @@ double DeviceThread::setUpperBandwidth(double upper)
 
     return settings.dsp.upperBandwidth;
 }
-
 
 double DeviceThread::setLowerBandwidth(double lower)
 {
@@ -1025,13 +1031,11 @@ bool DeviceThread::startAcquisition()
     // LOGD("Expecting blocksize of ", blockSize, " for ", evalBoard->getNumEnabledDataStreams(), "
     // streams");
 
-    startThread();
-
-    isTransmitting = true;
-
     assert(current_block == nullptr);
     const int numStreams = evalBoard->getNumEnabledDataStreams();
-    const int chunk_size = 32;
+
+    // const int chunk_size = 32;
+    const int chunk_size = 1;
     current_block = new Rhd2000DataBlock(numStreams, chunk_size, evalBoard->get_dio32());
 
     assert(isddrstream.size() == 0);
@@ -1048,6 +1052,11 @@ bool DeviceThread::startAcquisition()
                                    +settings.acquireAdc * evalBoard->ports.num_of_adc);
     data_buffer.resize(evalBoard->get_sample_size<char>() * SAMPLES_PER_DATA_BLOCK * 4);
     output_buffer.resize(current_aquisition_channels * chunk_size);
+    // output_buffer.resize(current_aquisition_channels * 300);
+
+    startThread();
+
+    isTransmitting = true;
 
     return true;
 }
@@ -1075,13 +1084,6 @@ bool DeviceThread::stopAcquisition()
 
     sourceBuffers[0]->clear();
 
-    if (deviceFound && boardType == ACQUISITION_BOARD) {
-        LOGD("Number of 16-bit words in FIFO: ", evalBoard->get_fifo_data_size<uint16_t>(true));
-
-        int ledArray[8] = {1, 0, 0, 0, 0, 0, 0, 0};
-        evalBoard->setLedDisplay(ledArray);
-    }
-
     isTransmitting = false;
     updateSettingsDuringAcquisition = false;
 
@@ -1101,12 +1103,11 @@ bool DeviceThread::stopAcquisition()
     return true;
 }
 
-
 bool DeviceThread::updateBuffer()
 {
-    using Clock = std::chrono::high_resolution_clock;
-    static auto sumtime = 0.0;
-    static auto measurementCount = 0;
+    // using Clock = std::chrono::high_resolution_clock;
+    // static auto sumtime = 0.0;
+    // static auto measurementCount = 0;
     const int samples_available = evalBoard->get_num_samples_available(true);
     if (samples_available > SAMPLES_PER_DATA_BLOCK * 4) {
         evalBoard->read_to_buffer(SAMPLES_PER_DATA_BLOCK * 4, &data_buffer[0]);
@@ -1114,20 +1115,20 @@ bool DeviceThread::updateBuffer()
             evalBoard->get_sample_size<char>() * current_block->num_samples;
         for (int chunk = 0; chunk < SAMPLES_PER_DATA_BLOCK * 4 / current_block->num_samples;
              ++chunk) {
-            auto start_time = Clock::now();
-            const auto all_start_time = start_time;
+            // auto start_time = Clock::now();
+            // const auto all_start_time = start_time;
 
             current_block->from_buffer(&data_buffer[chunk_buffer_size * chunk]);
-            auto rbt =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start_time)
-                    .count();
-            sumtime += rbt;
-            ++measurementCount;
+            // auto rbt =
+            //     std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start_time)
+            //         .count();
+            // sumtime += rbt;
+            // ++measurementCount;
             const int num_samples = current_block->num_samples;
-            if (chunk == (SAMPLES_PER_DATA_BLOCK * 4 / current_block->num_samples - 1))
-                fmt::print("read {} samples in {} ns avg {:.0f} us/samp, {} to go", num_samples,
-                           rbt, sumtime / measurementCount / num_samples, samples_available);
-            start_time = Clock::now();
+            // if (chunk == (SAMPLES_PER_DATA_BLOCK * 4 / current_block->num_samples - 1))
+            //    fmt::print("read {} samples in {} ns avg {:.0f} us/samp, {} to go", num_samples,
+            //               rbt, sumtime / measurementCount / num_samples, samples_available);
+            // start_time = Clock::now();
 
 
             // tranpose data from Time x Channel x Stream to Time x Stream x Channel
@@ -1142,7 +1143,7 @@ bool DeviceThread::updateBuffer()
                     auto &current_aux_buffer = auxBuffer[s * 3 + c];
                     for (int t = 0; t < num_samples; ++t) {
                         // aux is offset by 1
-                        const int aux = (t + 3) % 4;
+                        const int aux = (current_block->timeStamp[t] + 3) % 4;
                         // update aux buffer with new value that sampled every 4th sample
                         if (aux == c)
                             current_aux_buffer =
@@ -1164,25 +1165,26 @@ bool DeviceThread::updateBuffer()
             std::transform(current_block->ttlIn.begin(), current_block->ttlIn.end(), ttl.begin(),
                            [](auto t) { return t; });
 
-            if (chunk == (SAMPLES_PER_DATA_BLOCK * 4 / current_block->num_samples - 1))
-                fmt::print("Trans {} ns ", std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                               Clock::now() - start_time)
-                                               .count());
-            start_time = Clock::now();
+            // if (chunk == (SAMPLES_PER_DATA_BLOCK * 4 / current_block->num_samples - 1))
+            //     fmt::print("Trans {} ns ", std::chrono::duration_cast<std::chrono::nanoseconds>(
+            //                                    Clock::now() - start_time)
+            //                                    .count());
+            // start_time = Clock::now();
 
             sourceBuffers[0]->addToBuffer(&output_buffer[0], &current_block->timeStamp[0], &ts[0],
                                           &ttl[0], num_samples, num_samples);
 
-            if (chunk == (SAMPLES_PER_DATA_BLOCK * 4 / current_block->num_samples - 1))
-                fmt::print(
-                    "Added to buffer {} ns / sample , Total={}\n",
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start_time)
-                            .count() /
-                        num_samples,
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() -
-                                                                         all_start_time)
-                            .count() /
-                        num_samples);
+            // if (chunk == (SAMPLES_PER_DATA_BLOCK * 4 / current_block->num_samples - 1))
+            //     fmt::print(
+            //         "Added to buffer {} ns / sample , Total={}\n",
+            //         std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() -
+            //         start_time)
+            //                 .count() /
+            //             num_samples,
+            //         std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() -
+            //                                                              all_start_time)
+            //                 .count() /
+            //             num_samples);
         }
     }
 
@@ -1192,9 +1194,7 @@ bool DeviceThread::updateBuffer()
             if (dacChannelsToUpdate[k]) {
                 dacChannelsToUpdate[k] = false;
                 if (dacChannels[k] >= 0) {
-                    evalBoard->enableDac(k, true);
-                    evalBoard->selectDacDataStream(k, dacStream[k]);
-                    evalBoard->selectDacDataChannel(k, dacChannels[k]);
+                    evalBoard->config_dac(k, true, dacStream[k], dacChannels[k]);
                     evalBoard->setDacThreshold(k, (int) abs((dacThresholds[k] / 0.195) + 32768),
                                                dacThresholds[k] >= 0);
                     // evalBoard->setDacThresholdVoltage(k, (int) dacThresholds[k]);

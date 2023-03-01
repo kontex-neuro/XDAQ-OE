@@ -31,7 +31,6 @@
 #include <string>
 #include <vector>
 
-#include "DeviceThread.h"
 #include "rhythm-api/okFrontPanelDLL.h"
 #include "rhythm-api/rhd2000datablock.h"
 #include "rhythm-api/rhd2000evalboard.h"
@@ -40,6 +39,8 @@
 namespace RhythmNode
 {
 
+
+enum ChannelNamingScheme { GLOBAL_INDEX = 1, STREAM_INDEX = 2 };
 
 /**
     A headstage object represents a data source containing
@@ -58,26 +59,19 @@ namespace RhythmNode
 class Headstage
 {
 public:
-    const int max_streams;
     const std::string prefix;
     const std::string port;
     /** Constructor */
-    Headstage(std::string port, std::string prefix, int chip_idx, int max_streams);
+    Headstage(std::string port, std::string prefix, int max_streams);
 
     /** Destructor*/
     ~Headstage() = default;
-
-    /** Returns the index of this headstage's data stream (offset = 0 or 1) */
-    int getStreamIndex(int offset) const;
-
-    /** Sets the index of this headstage's data stream */
-    void setFirstStreamIndex(int streamIndex);
 
     /** Sets the index of this headstage's first neural data channel*/
     void setFirstChannel(int channelIndex);
 
     /** Returns the number of channels this headstage sends*/
-    int getNumChannels() const;
+    int getNumChannels() const { return channelsPerStream * numStreams; }
 
     /** Sets the number of channels per stream*/
     void setChannelsPerStream(int nchan);
@@ -86,7 +80,7 @@ public:
     void setNumStreams(int num);
 
     /** Returns the number of actively acquired neural data channels*/
-    int getNumActiveChannels() const;
+    int getNumActiveChannels() const { return getNumChannels();}
 
     /** Returns the name of a channel at a given index*/
     String getChannelName(int ch) const;
@@ -101,39 +95,38 @@ public:
     void setNamingScheme(ChannelNamingScheme scheme);
 
     /** Returns true if the headstage is connected*/
-    bool isConnected() const;
-
-
-    /** Sets the number of half-channels; mainly used for the 16-ch RHD2132 board */
-    void setHalfChannels(bool half);
-
-    /** Returns true if the headstage is in half-channels mode */
-    bool getHalfChannels() { return halfChannels; }
+    bool isConnected() const { return (numStreams > 0); }
 
     /** Auto-generates the channel names, based on the naming scheme*/
     void generateChannelNames();
 
     /** Sets impedance values after measurement*/
-    void setImpedances(Impedances &impedances);
+    void setImpedances(std::vector<float> magnitude, std::vector<float> phase)
+    {
+        impedanceMagnitudes = magnitude;
+        impedancePhases = phase;
+    }
 
     /** Returns the impedance magnitude for a channel (if it exists)*/
-    float getImpedanceMagnitude(int channel) const;
+    float getImpedanceMagnitude(int channel) const
+    {
+        return channel < impedanceMagnitudes.size() ? impedanceMagnitudes[channel] : 0.0f;
+    }
 
     /** Returns the impedance phase for a channel (if it exists)*/
-    float getImpedancePhase(int channel) const;
+    float getImpedancePhase(int channel) const
+    {
+        return channel < impedancePhases.size() ? impedancePhases[channel] : 0.0f;
+    }
 
     /** Returns true if impedance has been measured*/
     bool hasImpedanceData() const { return impedanceMagnitudes.size() > 0; }
 
 private:
     int streams;
-    int streamIndex;
-    int firstChannelIndex;
-
     int numStreams;
     int channelsPerStream;
-
-    bool halfChannels;
+    int firstChannelIndex;
 
     int MAX_NUM_HEADSTAGES;
 
@@ -141,8 +134,8 @@ private:
 
     std::vector<std::string> channelNames;
 
-    Array<float> impedanceMagnitudes;
-    Array<float> impedancePhases;
+    std::vector<float> impedanceMagnitudes;
+    std::vector<float> impedancePhases;
 };
 
 

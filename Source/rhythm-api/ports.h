@@ -36,7 +36,7 @@ public:
           max_streams_per_chip(ddr ? 2 : 1),
           max_streams(num_of_ports * spi_per_port * chips_per_spi * (ddr ? 2 : 1)),
           max_non_ddr_streams(num_of_ports * spi_per_port * chips_per_spi),
-          max_non_ddr_streams_per_spi(spi_per_port * chips_per_spi),
+          max_non_ddr_streams_per_spi(chips_per_spi),
           max_chips(num_of_ports * spi_per_port * chips_per_spi),
           max_streams_per_port(spi_per_port * chips_per_spi * (ddr ? 2 : 1)),
           max_non_ddr_streams_per_port(spi_per_port * chips_per_spi),

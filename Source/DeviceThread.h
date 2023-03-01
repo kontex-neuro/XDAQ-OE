@@ -21,15 +21,15 @@
 */
 
 
-#ifndef __DEVICETHREAD_H_2C4CBD67__
-#define __DEVICETHREAD_H_2C4CBD67__
-
+#pragma once
 #include <DataThreadHeaders.h>
 
 #include <array>
 #include <atomic>
+#include <optional>
 #include <vector>
 
+#include "Headstage.h"
 #include "rhythm-api/okFrontPanelDLL.h"
 #include "rhythm-api/rhd2000evalboard.h"
 #include "rhythm-api/rhd2000registers.h"
@@ -53,14 +53,11 @@ class ImpedanceMeter;
 
 enum BoardType { ACQUISITION_BOARD, INTAN_RHD_USB, RHD_RECORDING_CONTROLLER, XDAQ };
 
-enum ChannelNamingScheme { GLOBAL_INDEX = 1, STREAM_INDEX = 2 };
 
 struct Impedances {
-    Array<int> streams;
-    Array<int> channels;
-    Array<float> magnitudes;
-    Array<float> phases;
-    bool valid = false;
+    std::vector<int> stream_indices;
+    std::vector<std::vector<float>> magnitudes_by_stream;
+    std::vector<std::vector<float>> phases_by_stream;
 };
 
 /**
@@ -99,7 +96,7 @@ public:
                         OwnedArray<ConfigurationObject> *configurationObjects) override;
 
     /** Updates the measured impedance values for each channel*/
-    void impedanceMeasurementFinished();
+    void update_impedances(std::optional<Impedances> impedances);
 
     /** Returns an array of connected headstages*/
     Array<const Headstage *> getConnectedHeadstages();
@@ -201,6 +198,9 @@ public:
     void addDigitalOutputCommand(DigitalOutputTimer *timerToDelete, int ttlLine, bool state);
     const Ports &get_ports() const { return evalBoard->ports; }
     const std::vector<Headstage> &get_headstages() const { return headstages; }
+
+    bool expander_present() const { return evalBoard->expander_present(); }
+    bool set_dio32(bool enable) {return evalBoard->set_dio32(enable); }
 
 private:
     std::queue<DigitalOutputCommand> digitalOutputCommands;
@@ -314,7 +314,7 @@ private:
     StringArray ttlLineNames;
 
     /** Impedance data*/
-    Impedances impedances;
+    std::optional<Impedances> impedances = std::nullopt;
 
     StringArray channelNames;
 
@@ -329,4 +329,3 @@ private:
 };
 
 }  // namespace RhythmNode
-#endif  // __DEVICETHREAD_H_2C4CBD67__

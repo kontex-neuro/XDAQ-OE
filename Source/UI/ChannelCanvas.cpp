@@ -23,74 +23,54 @@
 
 #include "ChannelCanvas.h"
 
-#include "ChannelList.h"
-
 #include "../DeviceThread.h"
+#include "ChannelList.h"
 
 using namespace RhythmNode;
 
 /**********************************************/
 
-ChannelCanvas::ChannelCanvas(DeviceThread* board_,
-                             DeviceEditor* editor_) :
-    board(board_),
-    editor(editor_)
+ChannelCanvas::ChannelCanvas(DeviceThread *board_, DeviceEditor *editor_)
+    : board(board_), editor(editor_)
 {
-
     channelViewport = std::make_unique<Viewport>();
 
     channelList = std::make_unique<ChannelList>(board, editor);
 
     channelViewport->setViewedComponent(channelList.get(), false);
-    channelViewport->setScrollBarsShown(true, true);
+    channelViewport->setScrollBarsShown(true, true, true, true);
     addAndMakeVisible(channelViewport.get());
 
     update();
 
     resized();
-    
 }
 
 
-void ChannelCanvas::paint(Graphics& g)
-{
-    g.fillAll(Colours::grey);
+void ChannelCanvas::paint(Graphics &g) { g.fillAll(Colours::grey); }
 
-}
+void ChannelCanvas::refresh() { repaint(); }
 
-void ChannelCanvas::refresh()
-{
-    repaint();
-}
-
-void ChannelCanvas::refreshState()
-{
-    resized();
-}
+void ChannelCanvas::refreshState() { resized(); }
 
 void ChannelCanvas::update()
 {
-
     channelList->update();
 }
 
-void ChannelCanvas::beginAnimation()
-{
-    channelList->disableAll();
-}
+void ChannelCanvas::beginAnimation() { channelList->disableAll(); }
 
-void ChannelCanvas::endAnimation()
-{
-    channelList->enableAll();
-}
+void ChannelCanvas::endAnimation() { channelList->enableAll(); }
 
 void ChannelCanvas::resized()
 {
-
     int scrollBarThickness = channelViewport->getScrollBarThickness();
 
     channelViewport->setBounds(0, 0, getWidth(), getHeight());
 
-    channelList->setBounds(0, 0, getWidth()-scrollBarThickness, 200 + 22* channelList->getMaxChannels());
+    int enabled_headstages = 0;
+    for (auto &hs : board->get_headstages()) enabled_headstages += hs.isConnected();
+    const auto width = 10 + enabled_headstages * 200;
+    channelList->setBounds(0, 0, width - scrollBarThickness,
+                           200 + 22 * channelList->getMaxChannels());
 }
-

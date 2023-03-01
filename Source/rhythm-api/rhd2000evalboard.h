@@ -69,8 +69,6 @@ public:
     int open(const char *libname);
     bool uploadFpgaBitfile(std::string filename);
     void initialize();
-    void set_dio32(bool dio32) { this->dio32 = dio32; }
-    bool get_dio32() const { return dio32; }
 
     int FPGA_board;
     bool usb3;
@@ -220,7 +218,9 @@ public:
     void enableDacReref(bool enabled);
 
     // kontexdev
-    void enable32bitDIO(bool enabled);
+    bool set_dio32(bool dio32);
+    bool get_dio32() const { return dio32; }
+    bool expander_present() const { return expander; }
     bool UploadDACData(const std::vector<uint16_t> &commandList, int dacChannel, int length);
 
     enum class XDAQStatus : uint8_t {

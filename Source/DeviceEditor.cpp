@@ -134,8 +134,8 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     audioInterface->setBounds(grid_col2, 55, 70, 50);
 
     clockInterface = new ClockDivideInterface(board, this);
-    addAndMakeVisible(clockInterface);
-    clockInterface->setBounds(grid_col2, 80, 70, 50);
+    // addAndMakeVisible(clockInterface);
+    // clockInterface->setBounds(grid_col2, 80, 70, 50);
 
     // add DSP Offset Button
     dspoffsetButton = new UtilityButton("DSP:", Font("Small Text", 13, Font::plain));
@@ -168,7 +168,7 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     dacHPFlabel->setFont(Font("Small Text", 10, Font::plain));
     dacHPFlabel->setBounds(grid_col3, 40, 60, 20);
     dacHPFlabel->setColour(Label::textColourId, Colours::darkgrey);
-    addAndMakeVisible(dacHPFlabel);
+    // addAndMakeVisible(dacHPFlabel);
 
     dacHPFcombo = new ComboBox("dacHPFCombo");
     dacHPFcombo->setBounds(grid_col3, 55, 60, 18);
@@ -197,15 +197,18 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     ttlSettleCombo->setSelectedId(1, sendNotification);
     addAndMakeVisible(ttlSettleCombo);
 
-    ledButton = new UtilityButton("LED", Font("Small Text", 13, Font::plain));
-    ledButton->setRadius(3.0f);
-    ledButton->setBounds(grid_col3 + 28, 108, 32, 18);
-    ledButton->addListener(this);
-    ledButton->setClickingTogglesState(true);
-    ledButton->setTooltip("Toggle board LEDs");
-    ledButton->setToggleState(true, dontSendNotification);
 
-    if (board->boardType == ACQUISITION_BOARD) addAndMakeVisible(ledButton);
+    if (board->expander_present()) {
+        dio32_button =
+            std::make_unique<UtilityButton>("DIO32", Font("Small Text", 13, Font::plain));
+        dio32_button->setRadius(3.0f);
+        dio32_button->setBounds(grid_col3, 108, 32, 18);
+        dio32_button->addListener(this);
+        dio32_button->setClickingTogglesState(true);
+        dio32_button->setTooltip("Enable All 32 TTL Channels");
+        dio32_button->setToggleState(false, dontSendNotification);
+        addAndMakeVisible(dio32_button.get());
+    }
 }
 
 
@@ -316,8 +319,9 @@ void DeviceEditor::buttonClicked(Button *button)
     } else if (button == dspoffsetButton && !acquisitionIsActive) {
         LOGD("DSP offset ", button->getToggleState());
         board->setDSPOffset(button->getToggleState());
-    } else if (button == ledButton) {
-        LOGD("LED button");
+    } else if (button == dio32_button.get()) {
+        board->set_dio32(button->getToggleState());
+        LOGD("DIO32 button", button->getToggleState());
     }
 }
 
@@ -327,6 +331,9 @@ void DeviceEditor::startAcquisition()
     auxButton->setEnabledState(false);
     adcButton->setEnabledState(false);
     dspoffsetButton->setEnabledState(false);
+    if (dio32_button) {
+        dio32_button->setEnabledState(false);
+    }
 
     acquisitionIsActive = true;
 }
@@ -337,6 +344,9 @@ void DeviceEditor::stopAcquisition()
     auxButton->setEnabledState(true);
     adcButton->setEnabledState(true);
     dspoffsetButton->setEnabledState(true);
+    if (dio32_button) {
+        dio32_button->setEnabledState(true);
+    }
 
     acquisitionIsActive = false;
 }
@@ -359,8 +369,8 @@ void DeviceEditor::saveVisualizerEditorParameters(XmlElement *xml)
     xml->setAttribute("DSPCutoffFreq", dspInterface->getDspCutoffFreq());
     xml->setAttribute("save_impedance_measurements", saveImpedances);
     xml->setAttribute("auto_measure_impedances", measureWhenRecording);
-    xml->setAttribute("LEDs", ledButton->getToggleState());
     xml->setAttribute("ClockDivideRatio", clockInterface->getClockDivideRatio());
+    xml->setAttribute("DIO32", dio32_button->getToggleState());
 
     // loop through all headstage options interfaces and save their parameters
     for (int i = 0; i < 4; i++) {
@@ -394,8 +404,9 @@ void DeviceEditor::loadVisualizerEditorParameters(XmlElement *xml)
     dspInterface->setDspCutoffFreq(xml->getDoubleAttribute("DSPCutoffFreq"));
     saveImpedances = xml->getBoolAttribute("save_impedance_measurements");
     measureWhenRecording = xml->getBoolAttribute("auto_measure_impedances");
-    ledButton->setToggleState(xml->getBoolAttribute("LEDs", true), sendNotification);
     clockInterface->setClockDivideRatio(xml->getIntAttribute("ClockDivideRatio"));
+    if (board->expander_present())
+        dio32_button->setToggleState(xml->getBoolAttribute("DIO32"), sendNotification);
 
     int AudioOutputL = xml->getIntAttribute("AudioOutputL", -1);
     int AudioOutputR = xml->getIntAttribute("AudioOutputR", -1);

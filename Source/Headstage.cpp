@@ -25,13 +25,10 @@
 
 using namespace RhythmNode;
 
-Headstage::Headstage(std::string port, std::string prefix, int chip_idx, int max_streams)
+Headstage::Headstage(std::string port, std::string prefix, int max_streams)
     : port(port),
-      max_streams(max_streams),
       prefix(prefix),
       channelsPerStream(32),
-      halfChannels(false),
-      streamIndex(-1),
       firstChannelIndex(0),
       namingScheme(GLOBAL_INDEX)
 {
@@ -40,8 +37,6 @@ Headstage::Headstage(std::string port, std::string prefix, int chip_idx, int max
 void Headstage::setNumStreams(int num)
 {
     LOGD("Headstage ", prefix, " setting num streams to ", num);
-
-    if (num == 2) halfChannels = false;
 
     if (numStreams != num) {
         numStreams = num;
@@ -61,8 +56,6 @@ void Headstage::setChannelsPerStream(int nchan)
     }
 }
 
-void Headstage::setFirstStreamIndex(int streamIndex_) { streamIndex = streamIndex_; }
-
 void Headstage::setFirstChannel(int channelIndex)
 {
     LOGD("Headstage ", prefix, " setting first channel to ", channelIndex);
@@ -74,27 +67,6 @@ void Headstage::setFirstChannel(int channelIndex)
     }
 }
 
-int Headstage::getStreamIndex(int offset) const { return streamIndex + offset; }
-
-int Headstage::getNumChannels() const { return channelsPerStream * numStreams; }
-
-void Headstage::setHalfChannels(bool half)
-{
-    if (getNumChannels() == 64) return;
-
-    if (halfChannels != half) {
-        halfChannels = half;
-
-        generateChannelNames();
-    }
-}
-
-int Headstage::getNumActiveChannels() const
-{
-    return (int) (getNumChannels() / (halfChannels ? 2 : 1));
-}
-
-bool Headstage::isConnected() const { return (numStreams > 0); }
 
 String Headstage::getChannelName(int ch) const
 {
@@ -139,36 +111,4 @@ void Headstage::generateChannelNames()
             channelNames.push_back(prefix + "_CH" + std::to_string(i + 1));
         }
     }
-}
-
-void Headstage::setImpedances(Impedances &impedances)
-{
-    impedanceMagnitudes.clear();
-    impedancePhases.clear();
-
-    for (int i = 0; i < impedances.streams.size(); i++) {
-        if (impedances.streams[i] == streamIndex) {
-            impedanceMagnitudes.add(impedances.magnitudes[i]);
-            impedancePhases.add(impedances.phases[i]);
-        }
-
-        if (numStreams == 2 && impedances.streams[i] == streamIndex + 1) {
-            impedanceMagnitudes.add(impedances.magnitudes[i]);
-            impedancePhases.add(impedances.phases[i]);
-        }
-    }
-}
-
-float Headstage::getImpedanceMagnitude(int channel) const
-{
-    if (channel < impedanceMagnitudes.size()) return impedanceMagnitudes[channel];
-
-    return 0.0f;
-}
-
-float Headstage::getImpedancePhase(int channel) const
-{
-    if (channel < impedancePhases.size()) return impedancePhases[channel];
-
-    return 0.0f;
 }
