@@ -39,7 +39,7 @@ namespace RhythmNode
 class XDAQSystem : public DeviceThread
 {
 public:
-    XDAQSystem(SourceNode *sn) : DeviceThread(sn, XDAQ) {}
+    XDAQSystem(SourceNode *sn) : DeviceThread(sn) {}
 
     ~XDAQSystem() = default;
 };

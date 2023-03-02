@@ -85,46 +85,9 @@ elseif(APPLE)
 	set_property(TARGET ${PLUGIN_NAME} APPEND_STRING PROPERTY LINK_FLAGS
 	"-undefined dynamic_lookup -rpath @loader_path/../../../../shared-api8")
 
-	add_custom_command(TARGET ${PLUGIN_NAME} POST_BUILD COMMAND 
-    install_name_tool -change "@loader_path/../Frameworks/libokFrontPanel.dylib" 
-	"@rpath/libokFrontPanel.dylib" $<TARGET_FILE:${PLUGIN_NAME}>)
-
 	install(TARGETS ${PLUGIN_NAME} DESTINATION $ENV{HOME}/Library/Application\ Support/open-ephys/plugins-api8)
 endif()
 
-#create filters for vs and xcode
 
-foreach( src_file IN ITEMS ${SRC_FILES})
-	get_filename_component(src_path "${src_file}" PATH)
-	file(RELATIVE_PATH src_path_rel "${SOURCE_PATH}" "${src_path}")
-	string(REPLACE "/" "\\" group_name "${src_path_rel}")
-	source_group("${group_name}" FILES "${src_file}")
-endforeach()
-
-#additional libraries
-if (MSVC)
-	target_link_libraries(${PLUGIN_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/Resources/okFrontPanel.lib")
-	install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/okFrontPanel.dll DESTINATION ${GUI_BIN_DIR}/shared CONFIGURATIONS ${CMAKE_CONFIGURATION_TYPES})
-elseif(LINUX)
-	target_link_libraries(${PLUGIN_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/Resources/libokFrontPanel.so")
-	install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/libokFrontPanel.so DESTINATION ${GUI_BIN_DIR}/shared)
-elseif(APPLE)
-	add_subdirectory(third_party/fmt EXCLUDE_FROM_ALL)
-	# target_compile_options(${PLUGIN_NAME} PRIVATE -Wall)
-	target_link_libraries(${PLUGIN_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/Resources/libokFrontPanel.dylib" fmt::fmt-header-only)
-	install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/libokFrontPanel.dylib DESTINATION $ENV{HOME}/Library/Application\ Support/open-ephys/shared-api8)
-endif()
-
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/xdaq.bit DESTINATION ${GUI_BASE_DIR}/Build/open-ephys.app/Contents/Resources/shared)
-
-add_executable(testdb
-	Source/rhythm-api/rhd2000datablock.h
-	Source/rhythm-api/ports.h
-	Source/rhythm-api/utils.h
-	Source/rhythm-api/intan_chip.h
-	Source/t.cc)
-
-
-target_link_libraries(testdb
-	fmt::fmt-header-only
-)
+add_subdirectory(third_party/fmt EXCLUDE_FROM_ALL)
+target_link_libraries(${PLUGIN_NAME}  fmt::fmt-header-only)

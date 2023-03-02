@@ -50,7 +50,7 @@ extern "C" EXPORT int getPluginInfo(int index, Plugin::PluginInfo* info)
 	{
 	case 0:
 		info->type = Plugin::Type::DATA_THREAD;
-		info->dataThread.name = "XDAQ";
+		info->dataThread.name = "benchmark";
 		info->dataThread.creator = &createDataThread<RhythmNode::XDAQSystem>;
 		break;
 	default:

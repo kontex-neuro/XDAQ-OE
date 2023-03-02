@@ -26,66 +26,61 @@
 
 #include <VisualizerEditorHeaders.h>
 
-#include "ChannelList.h"
-#include "ChannelComponent.h"
+#include "../DeviceEditor.h"
 
 namespace RhythmNode
 {
 
-	class DeviceThread;
+class DeviceThread;
 
-	/**
+/**
 
-	  Allows the user to edit channel metadata
-	  and check electrode impedance values.
+  Allows the user to edit channel metadata
+  and check electrode impedance values.
 
-	  @see SourceNode
+  @see SourceNode
 
-	  */
+  */
 
-	class ChannelCanvas : public Visualizer
-	{
-	public:
+class ChannelCanvas : public Visualizer
+{
+public:
+    /** Constructor */
+    ChannelCanvas(DeviceThread *board): board(board)
+    {
+        update();
 
-		/** Constructor */
-		ChannelCanvas(DeviceThread* board,
-					  DeviceEditor* editor);
+        resized();
+    }
 
-		/** Destructor */
-		~ChannelCanvas() { }
+    /** Destructor */
+    ~ChannelCanvas() {}
 
-		/** Render the background */
-		void paint(Graphics& g);
+    /** Render the background */
+    void paint(Graphics &g) { g.fillAll(Colours::grey); }
 
-		/** Sets the layout of sub-components*/
-		void resized();
+    /** Sets the layout of sub-components*/
+    void resized(){};
 
-		/** Called when the component's tab becomes visible again*/
-		void refreshState();
+    /** Called when the component's tab becomes visible again*/
+    void refreshState(){};
 
-		/** Called when parameters of the underlying data processor are changed*/
-		void update();
+    /** Called when parameters of the underlying data processor are changed*/
+    void update(){};
 
-		/** Called instead of repaint to avoid redrawing underlying components*/
-		void refresh();
+    /** Called instead of repaint to avoid redrawing underlying components*/
+    void refresh(){};
 
-		/** Called when data acquisition starts*/
-		void beginAnimation();
+    /** Called when data acquisition starts*/
+    void beginAnimation(){};
 
-		/** Called when data acquisition ends*/
-		void endAnimation();
-	
-		/** Child components*/
-		std::unique_ptr<Viewport> channelViewport;
-		std::unique_ptr<ChannelList> channelList;
+    /** Called when data acquisition ends*/
+    void endAnimation() {};
 
-		/** Pointer to the acquisition device */
-		DeviceThread* board;
+    /** Pointer to the acquisition device */
+    DeviceThread *board;
 
-		/** Pointer to the editor object*/
-		DeviceEditor* editor;
-		
-	};
+};
 
-}
+}  // namespace RhythmNode
 #endif  // __CHANNELCANVAS_H_2AD3C591__
