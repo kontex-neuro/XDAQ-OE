@@ -7,8 +7,6 @@ include(../PluginRules.cmake)
 #add sources, not including OpenEphysLib.cpp
 add_sources(${PLUGIN_NAME}
 	rhythm-api/intan_chip.h
-	rhythm-api/okFrontPanel.h
-	rhythm-api/okFrontPanelDLL.h
 	rhythm-api/ports.h
 	rhythm-api/rhd2000datablock.h
 	rhythm-api/rhd2000evalboard.cpp

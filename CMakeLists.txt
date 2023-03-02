@@ -55,8 +55,9 @@ endif()
 
 target_compile_features(${PLUGIN_NAME} PUBLIC cxx_auto_type cxx_generalized_initializers)
 
-# disable deprecation warnings -Wno-deprecated-declarations
-target_compile_options(${PLUGIN_NAME} PRIVATE -Wno-deprecated-declarations)
+target_compile_options(${PLUGIN_NAME} PRIVATE $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-Wno-deprecated-declarations>)
+target_compile_options(${PLUGIN_NAME} PRIVATE $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-Wno-deprecated>)
+
 
 target_include_directories(${PLUGIN_NAME} PUBLIC ${GUI_BASE_DIR}/JuceLibraryCode ${GUI_BASE_DIR}/JuceLibraryCode/modules ${GUI_BASE_DIR}/Plugins/Headers ${GUI_COMMONLIB_DIR}/include)
 
@@ -121,6 +122,7 @@ target_link_libraries(${PLUGIN_NAME}
 
 if (MSVC)
 	install(FILES $<TARGET_FILE:okFrontPanel::okFrontPanel> DESTINATION ${GUI_BIN_DIR}/shared CONFIGURATIONS ${CMAKE_CONFIGURATION_TYPES})
+	install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/xdaq.bit DESTINATION ${GUI_BIN_DIR}/shared)
 elseif(LINUX)
 	install(FILES $<TARGET_FILE:okFrontPanel::okFrontPanel> DESTINATION ${GUI_BIN_DIR}/shared)
 elseif(APPLE)

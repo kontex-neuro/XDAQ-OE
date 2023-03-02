@@ -23,44 +23,44 @@
 
 #include "ChannelList.h"
 
-#include "ChannelComponent.h"
+#include <algorithm>
 
-#include "../DeviceThread.h"
 #include "../DeviceEditor.h"
+#include "../DeviceThread.h"
 #include "../Headstage.h"
+#include "ChannelComponent.h"
 
 using namespace RhythmNode;
 
 
-ChannelList::ChannelList(DeviceThread* board_, DeviceEditor* editor_) :
-    board(board_), editor(editor_), maxChannels(0)
+ChannelList::ChannelList(DeviceThread *board_, DeviceEditor *editor_)
+    : board(board_), editor(editor_), maxChannels(0)
 {
-
     channelComponents.clear();
 
-    numberingSchemeLabel = new Label("Channel Names:","Channel Names:");
+    numberingSchemeLabel = new Label("Channel Names:", "Channel Names:");
     numberingSchemeLabel->setEditable(false);
-    numberingSchemeLabel->setBounds(10,10,150, 25);
-    numberingSchemeLabel->setColour(Label::textColourId,juce::Colours::white);
+    numberingSchemeLabel->setBounds(10, 10, 150, 25);
+    numberingSchemeLabel->setColour(Label::textColourId, juce::Colours::white);
     addAndMakeVisible(numberingSchemeLabel);
 
     numberingScheme = new ComboBox("numberingScheme");
-    numberingScheme->addItem("Global",1);
-    numberingScheme->addItem("Stream-Based",2);
-    numberingScheme->setBounds(125,10,140,25);
+    numberingScheme->addItem("Global", 1);
+    numberingScheme->addItem("Stream-Based", 2);
+    numberingScheme->setBounds(125, 10, 140, 25);
     numberingScheme->addListener(this);
     numberingScheme->setSelectedId(1, dontSendNotification);
     addAndMakeVisible(numberingScheme);
 
     impedanceButton = new UtilityButton("Measure Impedances", Font("Default", 13, Font::plain));
     impedanceButton->setRadius(3);
-    impedanceButton->setBounds(280,10,140,25);
+    impedanceButton->setBounds(280, 10, 140, 25);
     impedanceButton->addListener(this);
     addAndMakeVisible(impedanceButton);
 
     saveImpedanceButton = new UtilityButton("Save Impedances", Font("Default", 13, Font::plain));
     saveImpedanceButton->setRadius(3);
-    saveImpedanceButton->setBounds(430,10,150,25);
+    saveImpedanceButton->setBounds(430, 10, 150, 25);
     saveImpedanceButton->addListener(this);
     saveImpedanceButton->setEnabled(false);
     addAndMakeVisible(saveImpedanceButton);
@@ -82,23 +82,15 @@ ChannelList::ChannelList(DeviceThread* board_, DeviceEditor* editor_) :
 }
 
 
-void ChannelList::buttonClicked(Button* btn)
+void ChannelList::buttonClicked(Button *btn)
 {
-
-    if (btn == impedanceButton)
-    {
+    if (btn == impedanceButton) {
         editor->measureImpedance();
         saveImpedanceButton->setEnabled(true);
-    }
-    else if (btn == saveImpedanceButton)
-    {
+    } else if (btn == saveImpedanceButton) {
+        FileChooser chooseOutputFile("Please select the location to save...", File(), ".xml");
 
-        FileChooser chooseOutputFile("Please select the location to save...",
-            File(),
-            ".xml");
-
-        if (chooseOutputFile.browseForFileToSave(true))
-        {
+        if (chooseOutputFile.browseForFileToSave(true)) {
             // Use the selected file
             File impedenceFile = chooseOutputFile.getResult();
             editor->saveImpedance(impedenceFile);
@@ -108,9 +100,7 @@ void ChannelList::buttonClicked(Button* btn)
 
 void ChannelList::update()
 {
-
-    if (!board->foundInputSource())
-    {
+    if (!board->foundInputSource()) {
         disableAll();
         return;
     }
@@ -131,9 +121,9 @@ void ChannelList::update()
         if (!hs.isConnected()) continue;
         column++;
 
-        maxChannels = std::max(hs.getNumActiveChannels() , maxChannels);
+        maxChannels = std::max<int>(hs.getNumActiveChannels(), maxChannels);
 
-        Label* lbl = new Label(hs.prefix, hs.prefix);
+        Label *lbl = new Label(hs.prefix, hs.prefix);
         lbl->setEditable(false);
         lbl->setBounds(10 + column * columnWidth, 40, columnWidth, 25);
         lbl->setJustificationType(juce::Justification::centred);
@@ -155,46 +145,34 @@ void ChannelList::update()
         staticLabels.add(deg);
         addAndMakeVisible(deg);
 
-        for (int ch = 0; ch < hs.getNumActiveChannels(); ch++)
-        {
-            ChannelComponent* comp =
-                new ChannelComponent(
-                    this,
-                    ch,
-                    0,
-                    hs.getChannelName(ch),
-                    gains,
-                    ContinuousChannel::ELECTRODE);
+        for (int ch = 0; ch < hs.getNumActiveChannels(); ch++) {
+            ChannelComponent *comp = new ChannelComponent(this, ch, 0, hs.getChannelName(ch), gains,
+                                                          ContinuousChannel::ELECTRODE);
 
             comp->setBounds(10 + column * columnWidth, 80 + ch * 22, columnWidth, 22);
-            if (hs.hasImpedanceData())
-            {
-                comp->setImpedanceValues(
-                    hs.getImpedanceMagnitude(ch),
-                    hs.getImpedancePhase(ch));
+            if (hs.hasImpedanceData()) {
+                comp->setImpedanceValues(hs.getImpedanceMagnitude(ch), hs.getImpedancePhase(ch));
             }
-            //comp->setUserDefinedData(k);
+            // comp->setUserDefinedData(k);
             channelComponents.add(comp);
             addAndMakeVisible(comp);
         }
-
     }
 
-    if (column == -1) // no headstages found
+    if (column == -1)  // no headstages found
     {
         impedanceButton->setEnabled(false);
     }
 
-    //if (board->enableAdcs())
+    // if (board->enableAdcs())
     //{
-        // create ADC channel interface
+    //  create ADC channel interface
     //}
 }
 
 void ChannelList::disableAll()
 {
-    for (auto channelComponent: channelComponents)
-    {
+    for (auto channelComponent : channelComponents) {
         channelComponent->disableEdit();
     }
 
@@ -205,8 +183,7 @@ void ChannelList::disableAll()
 
 void ChannelList::enableAll()
 {
-    for (int k=0; k<channelComponents.size(); k++)
-    {
+    for (int k = 0; k < channelComponents.size(); k++) {
         channelComponents[k]->enableEdit();
     }
     impedanceButton->setEnabled(true);
@@ -216,51 +193,43 @@ void ChannelList::enableAll()
 
 void ChannelList::setNewGain(int channel, float gain)
 {
-    //RHD2000Thread* thread = (RHD2000Thread*)proc->getThread();
-    //thread->modifyChannelGain(channel, gain);
-    //if (chainUpdate)
-    //    proc->requestChainUpdate();
+    // RHD2000Thread* thread = (RHD2000Thread*)proc->getThread();
+    // thread->modifyChannelGain(channel, gain);
+    // if (chainUpdate)
+    //     proc->requestChainUpdate();
 }
 
 void ChannelList::setNewName(int channel, String newName)
 {
-    //RHD2000Thread* thread = (RHD2000Thread*)proc->getThread();
-    //thread->modifyChannelName(channel, newName);
-    //if (chainUpdate)
-    //    proc->requestChainUpdate();
+    // RHD2000Thread* thread = (RHD2000Thread*)proc->getThread();
+    // thread->modifyChannelName(channel, newName);
+    // if (chainUpdate)
+    //     proc->requestChainUpdate();
 }
 
-void ChannelList::updateButtons()
-{
-}
+void ChannelList::updateButtons() {}
 
-void ChannelList::comboBoxChanged(ComboBox* b)
+void ChannelList::comboBoxChanged(ComboBox *b)
 {
-    if (b == numberingScheme)
-    {
-       board->setNamingScheme((ChannelNamingScheme) b->getSelectedId());
+    if (b == numberingScheme) {
+        board->setNamingScheme((ChannelNamingScheme) b->getSelectedId());
 
-       CoreServices::updateSignalChain(editor);
+        CoreServices::updateSignalChain(editor);
     }
 }
 
-void ChannelList::updateImpedance(Array<int> streams, Array<int> channels, Array<float> magnitude, Array<float> phase)
+void ChannelList::updateImpedance(Array<int> streams, Array<int> channels, Array<float> magnitude,
+                                  Array<float> phase)
 {
     int i = 0;
-    for (int k = 0; k < streams.size(); k++)
-    {
-        if (i >= channelComponents.size())
-            break; //little safety
+    for (int k = 0; k < streams.size(); k++) {
+        if (i >= channelComponents.size()) break;  // little safety
 
-        if (channelComponents[i]->type != ContinuousChannel::ELECTRODE)
-        {
+        if (channelComponents[i]->type != ContinuousChannel::ELECTRODE) {
             k--;
-        }
-        else
-        {
+        } else {
             channelComponents[i]->setImpedanceValues(magnitude[k], phase[k]);
         }
         i++;
     }
-
 }

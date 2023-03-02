@@ -252,7 +252,7 @@ private:
 
     bool expander = false;
 
-    bool dio32;
+    bool dio32 = false;
     SampleRate sampleRate = SampleRate::s30000Hz;
     int numDataStreams = 0;  // total number of data streams currently enabled
     int dataStreamEnabled[MAX_NUM_DATA_STREAMS] = {0};  // 0 (disabled) or 1 (enabled)

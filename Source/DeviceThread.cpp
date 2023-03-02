@@ -31,6 +31,7 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 
 #include "DeviceEditor.h"
@@ -39,8 +40,6 @@
 #include "rhythm-api/utils.h"
 
 using namespace RhythmNode;
-
-BoardType DeviceThread::boardType = ACQUISITION_BOARD;  // initialize static member
 
 #if defined(_WIN32)
 #define okLIB_NAME "okFrontPanel.dll"
@@ -58,12 +57,7 @@ BoardType DeviceThread::boardType = ACQUISITION_BOARD;  // initialize static mem
 
 constexpr int INIT_STEP = 128;
 
-DataThread *DeviceThread::createDataThread(SourceNode *sn)
-{
-    return new DeviceThread(sn, boardType);
-}
-
-DeviceThread::DeviceThread(SourceNode *sn, BoardType boardType_)
+DeviceThread::DeviceThread(SourceNode *sn)
     : DataThread(sn),
       deviceFound(false),
       chipRegisters(30000.0f),
@@ -72,8 +66,6 @@ DeviceThread::DeviceThread(SourceNode *sn, BoardType boardType_)
       impedanceThread(new ImpedanceMeter(this)),
       channelNamingScheme(GLOBAL_INDEX)
 {
-    boardType = boardType_;
-
     for (int i = 0; i < 8; i++) adcRangeSettings[i] = 0;
 
     for (int i = 0; i < evalBoard->ports.max_chips; i++) {
@@ -317,7 +309,6 @@ void DeviceThread::initializeBoard()
     File executable = File::getSpecialLocation(File::currentExecutableFile);
     const String executableDirectory = executable.getParentDirectory().getFullPathName();
 #endif
-    if (boardType != XDAQ) return;
 
     bitfilename = executableDirectory + File::getSeparatorString() + "shared" +
                   File::getSeparatorString() + "xdaq.bit";
@@ -654,11 +645,7 @@ float DeviceThread::getAdcBitVolts(int chan) const
     if (chan < adcBitVolts.size()) {
         return adcBitVolts[chan];
     } else {
-        if (boardType == ACQUISITION_BOARD) {
-            return 0.00015258789;  // +/-5V / pow(2,16)
-        } else if (boardType == INTAN_RHD_USB) {
-            return 0.0000503540039;  // 3.3V / pow(2,16)
-        }
+        return 0.0000503540039;  // 3.3V / pow(2,16)
         return -1;
     }
 }

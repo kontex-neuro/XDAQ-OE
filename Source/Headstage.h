@@ -74,12 +74,11 @@ public:
 
     /** Sets the number of channels per stream*/
     void setChannelsPerStream(int nchan);
-    int getNumStreams() const { return streams; }
     /** Sets the number of streams for this headstage (1 or 2)*/
     void setNumStreams(int num);
 
     /** Returns the number of actively acquired neural data channels*/
-    int getNumActiveChannels() const { return getNumChannels();}
+    int getNumActiveChannels() const { return getNumChannels(); }
 
     /** Returns the name of a channel at a given index*/
     String getChannelName(int ch) const;
@@ -122,14 +121,11 @@ public:
     bool hasImpedanceData() const { return impedanceMagnitudes.size() > 0; }
 
 private:
-    int streams;
-    int numStreams;
-    int channelsPerStream;
-    int firstChannelIndex;
+    int numStreams = 0;
+    int channelsPerStream = 32;
+    int firstChannelIndex = 0;
 
-    int MAX_NUM_HEADSTAGES;
-
-    ChannelNamingScheme namingScheme;
+    ChannelNamingScheme namingScheme = GLOBAL_INDEX;
 
     std::vector<std::string> channelNames;
 

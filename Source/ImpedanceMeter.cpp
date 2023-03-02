@@ -457,26 +457,8 @@ void ImpedanceMeter::restoreBoardSettings()
     board->evalBoard->setMaxTimeStep(0);
     board->evalBoard->flush();
     // Switch back to flatline
-    board->evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::SPIPort::PortA,
+    board->evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::SPIPort::All,
                                            Rhd2000EvalBoard::AuxCmdSlot::AuxCmd1, 0);
-    board->evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::SPIPort::PortB,
-                                           Rhd2000EvalBoard::AuxCmdSlot::AuxCmd1, 0);
-    board->evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::SPIPort::PortC,
-                                           Rhd2000EvalBoard::AuxCmdSlot::AuxCmd1, 0);
-    board->evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::SPIPort::PortD,
-                                           Rhd2000EvalBoard::AuxCmdSlot::AuxCmd1, 0);
-
-    if (board->boardType == RHD_RECORDING_CONTROLLER || board->boardType == XDAQ) {
-        board->evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::SPIPort::PortE,
-                                               Rhd2000EvalBoard::AuxCmdSlot::AuxCmd3, 3);
-        board->evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::SPIPort::PortF,
-                                               Rhd2000EvalBoard::AuxCmdSlot::AuxCmd3, 3);
-        board->evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::SPIPort::PortG,
-                                               Rhd2000EvalBoard::AuxCmdSlot::AuxCmd3, 3);
-        board->evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::SPIPort::PortH,
-                                               Rhd2000EvalBoard::AuxCmdSlot::AuxCmd3, 3);
-    }
-
     board->evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmdSlot::AuxCmd1, 0, 1);
 
     board->evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::SPIPort::All,

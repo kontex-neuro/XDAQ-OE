@@ -50,9 +50,6 @@ namespace RhythmNode
 class Headstage;
 class ImpedanceMeter;
 
-enum BoardType { ACQUISITION_BOARD, INTAN_RHD_USB, RHD_RECORDING_CONTROLLER, XDAQ };
-
-
 struct Impedances {
     std::vector<int> stream_indices;
     std::vector<std::vector<float>> magnitudes_by_stream;
@@ -70,7 +67,7 @@ class DeviceThread : public DataThread
 
 public:
     /** Constructor; must specify the type of board used */
-    DeviceThread(SourceNode *sn, BoardType boardType);
+    DeviceThread(SourceNode *sn);
 
     /** Destructor */
     ~DeviceThread();
@@ -167,10 +164,6 @@ public:
 
     short getAdcRange(int adcChannel) const;
 
-    static DataThread *createDataThread(SourceNode *sn);
-
-    static BoardType boardType;
-
     class DigitalOutputTimer : public Timer
     {
     public:
@@ -199,7 +192,7 @@ public:
     const std::vector<Headstage> &get_headstages() const { return headstages; }
 
     bool expander_present() const { return evalBoard->expander_present(); }
-    bool set_dio32(bool enable) {return evalBoard->set_dio32(enable); }
+    bool set_dio32(bool enable) { return evalBoard->set_dio32(enable); }
 
 private:
     std::queue<DigitalOutputCommand> digitalOutputCommands;

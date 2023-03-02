@@ -27,10 +27,7 @@ using namespace RhythmNode;
 
 Headstage::Headstage(std::string port, std::string prefix, int max_streams)
     : port(port),
-      prefix(prefix),
-      channelsPerStream(32),
-      firstChannelIndex(0),
-      namingScheme(GLOBAL_INDEX)
+      prefix(prefix)
 {
 }
 

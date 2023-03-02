@@ -42,14 +42,7 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
 {
     canvas = nullptr;
 
-    if (board->boardType == ACQUISITION_BOARD)
-        tabText = "Acq Board";
-    else if (board->boardType == INTAN_RHD_USB)
-        tabText = "Intan USB";
-    else if (board->boardType == RHD_RECORDING_CONTROLLER)
-        tabText = "RHD Controller";
-    else if (board->boardType == XDAQ)
-        tabText = "XDAQ";
+    tabText = "XDAQ";
 
     measureWhenRecording = false;
     saveImpedances = false;
