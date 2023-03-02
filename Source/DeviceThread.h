@@ -30,7 +30,6 @@
 #include <vector>
 
 #include "Headstage.h"
-#include "rhythm-api/okFrontPanelDLL.h"
 #include "rhythm-api/rhd2000evalboard.h"
 #include "rhythm-api/rhd2000registers.h"
 
@@ -302,8 +301,6 @@ private:
     bool dacChannelsToUpdate[8] = {0};
 
     Array<int> chipId;  // TODO: Fill this in
-
-    Array<int> numChannelsPerDataStream;
 
     ChannelNamingScheme channelNamingScheme;
 

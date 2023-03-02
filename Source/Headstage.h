@@ -31,7 +31,6 @@
 #include <string>
 #include <vector>
 
-#include "rhythm-api/okFrontPanelDLL.h"
 #include "rhythm-api/rhd2000datablock.h"
 #include "rhythm-api/rhd2000evalboard.h"
 #include "rhythm-api/rhd2000registers.h"

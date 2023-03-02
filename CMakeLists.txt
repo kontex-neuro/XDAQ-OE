@@ -10,6 +10,11 @@ endif()
 get_filename_component(PROJECT_FOLDER ${CMAKE_CURRENT_SOURCE_DIR} ABSOLUTE)
 get_filename_component(PLUGIN_NAME ${PROJECT_FOLDER} NAME)
 
+set(CMAKE_MODULE_PATH
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+    ${CMAKE_MODULE_PATH}
+)
+
 set(CMAKE_OSX_ARCHITECTURES "x86_64" CACHE STRING "Build architecture for Mac OS X" FORCE)
 
 project(OE_PLUGIN_${PLUGIN_NAME})
@@ -65,6 +70,9 @@ if (NOT CMAKE_LIBRARY_ARCHITECTURE)
 	endif()
 endif()
 
+target_compile_options(${PLUGIN_NAME} PRIVATE $<$<CONFIG:Debug>:-fsanitize=address>)
+target_link_libraries(${PLUGIN_NAME} $<$<CONFIG:Debug>:-fsanitize=address>)
+
 #Libraries and compiler options
 if(MSVC)
 	target_link_libraries(${PLUGIN_NAME} ${GUI_BIN_DIR}/open-ephys.lib)
@@ -101,30 +109,21 @@ foreach( src_file IN ITEMS ${SRC_FILES})
 	source_group("${group_name}" FILES "${src_file}")
 endforeach()
 
-#additional libraries
-if (MSVC)
-	target_link_libraries(${PLUGIN_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/Resources/okFrontPanel.lib")
-	install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/okFrontPanel.dll DESTINATION ${GUI_BIN_DIR}/shared CONFIGURATIONS ${CMAKE_CONFIGURATION_TYPES})
-elseif(LINUX)
-	target_link_libraries(${PLUGIN_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/Resources/libokFrontPanel.so")
-	install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/libokFrontPanel.so DESTINATION ${GUI_BIN_DIR}/shared)
-elseif(APPLE)
-	add_subdirectory(third_party/fmt EXCLUDE_FROM_ALL)
-	# target_compile_options(${PLUGIN_NAME} PRIVATE -Wall)
-	target_link_libraries(${PLUGIN_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/Resources/libokFrontPanel.dylib" fmt::fmt-header-only)
-	install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/libokFrontPanel.dylib DESTINATION $ENV{HOME}/Library/Application\ Support/open-ephys/shared-api8)
-endif()
+# additional libraries
+add_subdirectory(third_party/fmt EXCLUDE_FROM_ALL)
 
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/xdaq.bit DESTINATION ${GUI_BASE_DIR}/Build/open-ephys.app/Contents/Resources/shared)
+find_package(okFrontPanel REQUIRED)
 
-add_executable(testdb
-	Source/rhythm-api/rhd2000datablock.h
-	Source/rhythm-api/ports.h
-	Source/rhythm-api/utils.h
-	Source/rhythm-api/intan_chip.h
-	Source/t.cc)
-
-
-target_link_libraries(testdb
+target_link_libraries(${PLUGIN_NAME}
 	fmt::fmt-header-only
+	okFrontPanel::okFrontPanel
 )
+
+if (MSVC)
+	install(FILES $<TARGET_FILE:okFrontPanel::okFrontPanel> DESTINATION ${GUI_BIN_DIR}/shared CONFIGURATIONS ${CMAKE_CONFIGURATION_TYPES})
+elseif(LINUX)
+	install(FILES $<TARGET_FILE:okFrontPanel::okFrontPanel> DESTINATION ${GUI_BIN_DIR}/shared)
+elseif(APPLE)
+	install(FILES $<TARGET_FILE:okFrontPanel::okFrontPanel> DESTINATION $ENV{HOME}/Library/Application\ Support/open-ephys/shared-api8)
+	install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/xdaq.bit DESTINATION ${GUI_BASE_DIR}/Build/open-ephys.app/Contents/Resources/shared)
+endif()
