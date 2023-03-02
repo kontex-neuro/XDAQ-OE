@@ -370,7 +370,7 @@ void DeviceEditor::saveVisualizerEditorParameters(XmlElement *xml)
     xml->setAttribute("save_impedance_measurements", saveImpedances);
     xml->setAttribute("auto_measure_impedances", measureWhenRecording);
     xml->setAttribute("ClockDivideRatio", clockInterface->getClockDivideRatio());
-    xml->setAttribute("DIO32", dio32_button->getToggleState());
+    if (dio32_button) xml->setAttribute("DIO32", dio32_button->getToggleState());
 
     // loop through all headstage options interfaces and save their parameters
     for (int i = 0; i < 4; i++) {
@@ -405,7 +405,7 @@ void DeviceEditor::loadVisualizerEditorParameters(XmlElement *xml)
     saveImpedances = xml->getBoolAttribute("save_impedance_measurements");
     measureWhenRecording = xml->getBoolAttribute("auto_measure_impedances");
     clockInterface->setClockDivideRatio(xml->getIntAttribute("ClockDivideRatio"));
-    if (board->expander_present())
+    if (dio32_button)
         dio32_button->setToggleState(xml->getBoolAttribute("DIO32"), sendNotification);
 
     int AudioOutputL = xml->getIntAttribute("AudioOutputL", -1);
