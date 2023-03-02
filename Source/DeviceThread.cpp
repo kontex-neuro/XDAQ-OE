@@ -1148,7 +1148,7 @@ bool DeviceThread::updateBuffer()
             auto ts = std::vector<double>(num_samples, 0);
             // Not ideal to cast into another vector, but it's more convenient to switch between
             // 16 / 32 channels
-            auto ttl = std::vector<uint64_t>(num_samples);
+            auto ttl = std::vector<unsigned long long>(num_samples);
             std::transform(current_block->ttlIn.begin(), current_block->ttlIn.end(), ttl.begin(),
                            [](auto t) { return t; });
 

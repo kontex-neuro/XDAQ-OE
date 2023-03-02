@@ -11,9 +11,9 @@
 
 constexpr int SAMPLES_PER_DATA_BLOCK = 128;
 constexpr int CHANNELS_PER_STREAM = 32;
-constexpr uint64_t RHD2000_HEADER_MAGIC_NUMBER = 0xd7a22aaa38132a53;
+constexpr std::uint64_t RHD2000_HEADER_MAGIC_NUMBER = 0xd7a22aaa38132a53;
 
-template <typename Unit, typename amp = uint16_t>
+template <typename Unit, typename amp = std::uint16_t>
 std::size_t sample_size(int streams, int channels_per_stream, bool dio32)
 {
     // magic number 8 bytes; time stamp 4 bytes;
@@ -34,13 +34,13 @@ std::size_t block_size(int samples, int streams, int channels_per_stream, bool d
     return samples * sample_size<Unit, amp>(streams, channels_per_stream, dio32) / sizeof(Unit);
 }
 
-template <typename Unit, typename amp = uint16_t>
+template <typename Unit, typename amp = std::uint16_t>
 std::size_t max_sample_size(int streams)
 {
     return sample_size<Unit, amp>(streams, CHANNELS_PER_STREAM, true);
 }
 
-template <uint64_t Magic,
+template <std::uint64_t Magic,
           auto &as_ts,      // always uint32_t but keep for consistency
           auto &cast_ts_f,  // cast to desired type, OE use int64_t
           auto &as_amp, auto &cast_amp_f, auto &amp_index,  // deseralize and cast ampifier data
@@ -63,11 +63,11 @@ public:
 
     // TODO: upgrade to std::span when C++20 is more commonly available to avoid copying data
     std::vector<ts_t> timeStamp;
-    std::vector<std::vector<uint16_t>> aux;
+    std::vector<std::vector<std::uint16_t>> aux;
     std::conditional_t<use_span, std::span<amp_t>, std::vector<amp_t>> amp;
     std::conditional_t<use_span, std::span<adc_t>, std::vector<adc_t>> adc;
-    std::vector<uint32_t> ttlIn;
-    std::vector<uint32_t> ttlOut;
+    std::vector<std::uint32_t> ttlIn;
+    std::vector<std::uint32_t> ttlOut;
 
     template <typename Unit>
     std::size_t get_block_size() const
@@ -164,7 +164,11 @@ public:
     }
 };
 
-inline int64_t cast_ts(uint32_t x) { return static_cast<int64_t>(x); }
+inline long long cast_ts(std::uint32_t x)
+{
+    return x;
+}
+
 
 // Original Order
 inline int amp_index_time_channel_stream(int samples, int channels, int streams, int t, int c,
