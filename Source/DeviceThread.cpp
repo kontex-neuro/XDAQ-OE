@@ -12,7 +12,7 @@ using namespace RhythmNode;
 
 DeviceThread::DeviceThread(SourceNode *sn) : DataThread(sn)
 {
-    sourceBuffers.add(new DataBuffer(num_channels, 10000));
+    sourceBuffers.add(new DataBuffer(1, 8192));
 }
 
 DeviceThread::~DeviceThread() {}
@@ -77,10 +77,11 @@ void DeviceThread::updateSettings(OwnedArray<ContinuousChannel> *continuousChann
 
 bool DeviceThread::startAcquisition()
 {
-    output_buffer.resize(num_channels * 300);
-    ttl.resize(300, 0);
-    tsd.resize(300, 0);
-    ts.resize(300);
+    sourceBuffers[0]->resize(num_channels, 8192);
+    output_buffer.resize(num_channels * num_samples);
+    ttl.resize(num_samples, 0);
+    tsd.resize(num_samples, 0);
+    ts.resize(num_samples);
     time_idx = 0;
     startThread();
 
@@ -103,10 +104,9 @@ bool DeviceThread::stopAcquisition()
 bool DeviceThread::updateBuffer()
 {
     using Clock = std::chrono::high_resolution_clock;
-    const int num_samples = 300;
 
     auto start = Clock::now();
-    if (start - last_update_time < std::chrono::milliseconds(10)) {
+    if (start - last_update_time < std::chrono::microseconds(num_samples * 100 / 3)) {
         return true;
     }
 
@@ -118,15 +118,14 @@ bool DeviceThread::updateBuffer()
 
     auto begin = output_buffer.begin();
     if (modified_layout) {
-        for (int c = 0; c < num_channels; ++c) {
-            for (int i = 0; i < num_samples; ++i) {
-                *begin++ = std::sin(2 * M_PI * ts[i] / 300) * 2000;
-            }
+        for (int i = 0; i < num_samples; ++i) *begin++ = std::sin(2 * M_PI * ts[i] / 300.0) * 2000;
+        for (int c = 0; c < num_channels - 1; ++c) {
+            begin = std::copy(output_buffer.begin(), output_buffer.begin() + num_samples, begin);
         }
     } else {
         for (int i = 0; i < num_samples; ++i) {
             for (int c = 0; c < num_channels; ++c) {
-                *begin++ = std::sin(2 * M_PI * ts[i] / 300) * 2000;
+                *begin++ = std::sin(2 * M_PI * ts[i] / 300.0) * 2000;
             }
         }
     }
@@ -134,14 +133,21 @@ bool DeviceThread::updateBuffer()
     auto start_time = Clock::now();
     sourceBuffers[0]->addToBuffer(&output_buffer[0], &ts[0], &tsd[0], &ttl[0], num_samples,
                                   chunk_size);
-    if (ts[0] % 3000 == 0) {
-        const auto passed = Clock::now() - start_time;
-        if (passed > std::chrono::microseconds(100)) {
-            fmt::print("addToBuffer took {} us\n",
-                       std::chrono::duration_cast<std::chrono::microseconds>(passed).count());
+    const auto passed = Clock::now() - start_time;
+
+    if (ts[0] % 30000 < num_samples) accumulated_time = Clock::duration::zero();
+
+    accumulated_time += passed;
+
+    if (ts[0] % 30000 > (30000 - 1 - num_samples)) {
+        const auto avg =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(accumulated_time).count() /
+            30000.0;
+        if (avg > 10000) {
+            fmt::print("addToBuffer took {:8.1f} us/sample, {:.3f}%\n", avg / 1000,
+                       3 * avg / 100000);
         } else {
-            fmt::print("addToBuffer took {} ns\n",
-                       std::chrono::duration_cast<std::chrono::nanoseconds>(passed).count());
+            fmt::print("addToBuffer took {:8.1f} ns/sample, {:.3f}%\n", avg, 3 * avg / 100000);
         }
     }
 

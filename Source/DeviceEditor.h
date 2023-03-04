@@ -52,8 +52,12 @@ public:
 private:
     std::unique_ptr<UtilityButton> new_layout_button;
     std::unique_ptr<ComboBox> chunk_size_combo;
+    std::unique_ptr<ComboBox> num_sample_combo;
+    std::unique_ptr<ComboBox> num_channel_combo;
 
     std::unique_ptr<Label> chunk_size_label;
+    std::unique_ptr<Label> num_sample_label;
+    std::unique_ptr<Label> num_channel_label;
 
     DeviceThread *board;
     ChannelCanvas *canvas = nullptr;

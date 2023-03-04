@@ -47,11 +47,13 @@ public:
 
     int chunk_size = 1;
     bool modified_layout = false;
+    int num_samples = 1;
+    int num_channels = 1;
 
 private:
-    const int num_channels = 1024;
     int64_t time_idx = 0;
     Clock::time_point last_update_time = Clock::now();
+    Clock::duration accumulated_time = Clock::duration::zero();
 
     std::vector<float> output_buffer;
     std::vector<uint64_t> ttl;
