@@ -1,6 +1,6 @@
 # XDAQ Plugin
 
-![XDAQ hardware](https://i.shgcdn.com/d17a3299-443e-4441-8bbd-07de7e8fb70f)
+![XDAQ hardware](https://i.shgcdn.com/d17a3299-443e-4441-8bbd-07de7e8fb70f/-/format/auto/-/preview/3000x3000/-/quality/lighter/)
 
 Streams data from Kontex XDAQ devices (XDAQ ONE and XDAQ Core).
 
