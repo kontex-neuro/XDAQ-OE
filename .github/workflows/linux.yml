@@ -28,6 +28,9 @@ jobs:
                   cd Build
                   cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release ..
                   make
+              env:
+                  CC: gcc-10
+                  CXX: g++-10
             #    - name: test
             #      run: cd build && ctest
             - name: deploy
