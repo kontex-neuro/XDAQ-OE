@@ -301,17 +301,13 @@ void DeviceThread::initializeBoard()
 {
     String bitfilename;
 
-#if defined(__APPLE__)
-    File appBundle = File::getSpecialLocation(File::currentApplicationFile);
-    const String executableDirectory =
-        appBundle.getChildFile("Contents/Resources").getFullPathName();
-#else
-    File executable = File::getSpecialLocation(File::currentExecutableFile);
-    const String executableDirectory = executable.getParentDirectory().getFullPathName();
-#endif
+    File sharedDir = CoreServices::getSavedStateDirectory();
+	if(!sharedDir.getFullPathName().contains("plugin-GUI" + File::getSeparatorString() + "Build"))
+		sharedDir = sharedDir.getChildFile("shared-api" + String(PLUGIN_API_VER));
+	else
+		sharedDir = sharedDir.getChildFile("shared");
 
-    bitfilename = executableDirectory + File::getSeparatorString() + "shared" +
-                  File::getSeparatorString() + "xdaq.bit";
+    bitfilename = sharedDir.getFullPathName() + File::getSeparatorString() + "xdaq.bit";
 
     if (!uploadBitfile(bitfilename)) {
         return;
