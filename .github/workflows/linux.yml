@@ -15,7 +15,6 @@ jobs:
             - name: setup
               run: |
                   sudo apt update
-                  sudo apt install gcc-10 g++-10
                   cd ../..
                   git clone https://github.com/open-ephys/plugin-GUI.git --branch main
                   sudo ./plugin-GUI/Resources/Scripts/install_linux_dependencies.sh
@@ -28,18 +27,15 @@ jobs:
                   git submodule update --init
                   cd Build
                   cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release ..
-                  cmake --build .
-              env:
-                  CC: gcc-10
-                  CXX: g++-10
+                  make
             #    - name: test
             #      run: cd build && ctest
             - name: deploy
-              if: github.ref == 'refs/heads/xdaq_dev'
+              if: github.ref == 'refs/heads/main'
               env:
-                  #        artifactoryApiKey: ${{ secrets.artifactoryApiKey }}
+                  artifactoryApiKey: ${{ secrets.artifactoryApiKey }}
                   build_dir: "Build"
-                  package: XDAQ-OE-linux
+                  package: XDAQ-linux
               run: |
                   plugin_api=$(grep -rnw ../../plugin-GUI/Source -e '#define PLUGIN_API_VER' | grep -Eo "[0-9]*" | tail -1)
                   tag=$(git describe --tags $(git rev-list --tags --max-count=1))
@@ -48,6 +44,7 @@ jobs:
                   cp -r $build_dir/*.so plugins
                   mkdir shared	
                   cp third_party/FrontPanel/libokFrontPanel.so shared
+                  cp Resources/xdaq.bit shared
                   zipfile=${package}_${new_plugin_ver}.zip
                   zip -r -X $zipfile plugins shared
-              # curl -H "X-JFrog-Art-Api:$artifactoryApiKey" -T $zipfile "https://openephys.jfrog.io/artifactory/RhythmPlugins-plugin/linux/$zipfile"
+                  curl -H "X-JFrog-Art-Api:$artifactoryApiKey" -T $zipfile "https://openephys.jfrog.io/artifactory/XDAQ-plugin/linux/$zipfile"
