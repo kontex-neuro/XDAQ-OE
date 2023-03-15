@@ -161,7 +161,7 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     dacHPFlabel->setFont(Font("Small Text", 10, Font::plain));
     dacHPFlabel->setBounds(grid_col3, 40, 60, 20);
     dacHPFlabel->setColour(Label::textColourId, Colours::darkgrey);
-    // addAndMakeVisible(dacHPFlabel);
+    addAndMakeVisible(dacHPFlabel);
 
     dacHPFcombo = new ComboBox("dacHPFCombo");
     dacHPFcombo->setBounds(grid_col3, 55, 60, 18);
