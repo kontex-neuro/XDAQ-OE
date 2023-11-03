@@ -279,14 +279,8 @@ private:
     /** Open the connection to the acquisition board*/
     bool openBoard(String pathToLibrary);
 
-    /** Upload the bitfile*/
-    bool uploadBitfile(String pathToBitfile);
-
     /** Initialize the board*/
     void initializeBoard();
-
-    /** Update register settings*/
-    void updateRegisters();
 
     int dacChannels[8] = {0};
     int dacStream[8] = {0};
@@ -312,7 +306,6 @@ private:
     std::vector<bool> isddrstream;
     int current_aquisition_channels = 0;
     int current_aquisition_streams = 0;
-    std::vector<unsigned char> data_buffer;
     std::vector<float> output_buffer;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DeviceThread);

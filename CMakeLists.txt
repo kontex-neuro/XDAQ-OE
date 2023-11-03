@@ -15,8 +15,6 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_MODULE_PATH}
 )
 
-set(CMAKE_OSX_ARCHITECTURES "x86_64" CACHE STRING "Build architecture for Mac OS X" FORCE)
-
 project(OE_PLUGIN_${PLUGIN_NAME})
 set(CMAKE_SHARED_LIBRARY_PREFIX "")
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
@@ -71,8 +69,8 @@ if (NOT CMAKE_LIBRARY_ARCHITECTURE)
 	endif()
 endif()
 
-target_compile_options(${PLUGIN_NAME} PRIVATE $<$<CONFIG:Debug>:-fsanitize=address>)
-target_link_libraries(${PLUGIN_NAME} $<$<CONFIG:Debug>:-fsanitize=address>)
+# target_compile_options(${PLUGIN_NAME} PRIVATE $<$<CONFIG:Debug>:-fsanitize=address>)
+# target_link_libraries(${PLUGIN_NAME} $<$<CONFIG:Debug>:-fsanitize=address>)
 
 #Libraries and compiler options
 if(MSVC)
@@ -94,9 +92,9 @@ elseif(APPLE)
 	set_property(TARGET ${PLUGIN_NAME} APPEND_STRING PROPERTY LINK_FLAGS
 	"-undefined dynamic_lookup -rpath @loader_path/../../../../shared-api8")
 
-	add_custom_command(TARGET ${PLUGIN_NAME} POST_BUILD COMMAND 
-    install_name_tool -change "@loader_path/../Frameworks/libokFrontPanel.dylib" 
-	"@rpath/libokFrontPanel.dylib" $<TARGET_FILE:${PLUGIN_NAME}>)
+	# add_custom_command(TARGET ${PLUGIN_NAME} POST_BUILD COMMAND 
+    # install_name_tool -change "@loader_path/../Frameworks/libokFrontPanel.dylib" 
+	# "@rpath/libokFrontPanel.dylib" $<TARGET_FILE:${PLUGIN_NAME}>)
 
 	install(TARGETS ${PLUGIN_NAME} DESTINATION $ENV{HOME}/Library/Application\ Support/open-ephys/plugins-api8)
 endif()
@@ -112,21 +110,31 @@ endforeach()
 
 # additional libraries
 add_subdirectory(third_party/fmt EXCLUDE_FROM_ALL)
-
-find_package(okFrontPanel REQUIRED)
+find_package(cppzmq)
+# find_package(okFrontPanel REQUIRED)
+find_package(ZeroMQ REQUIRED)
+include(utils)
+message(STATUS "ZeroMQ_INCLUDE_DIR: ${ZeroMQ_INCLUDE_DIR}")
+message(STATUS "ZeroMQ_LIBRARY: ${ZeroMQ_LIBRARY}")
+target_include_directories(${PLUGIN_NAME} PRIVATE
+    ${PROJECT_SOURCE_DIR}/third_party/zpp_bits
+)
 
 target_link_libraries(${PLUGIN_NAME}
 	fmt::fmt-header-only
-	okFrontPanel::okFrontPanel
+	# okFrontPanel::okFrontPanel
+	cppzmq
+	${ZeroMQ_LIBRARY}
 )
 
 if (MSVC)
-	install(FILES $<TARGET_FILE:okFrontPanel::okFrontPanel> DESTINATION ${GUI_BIN_DIR}/shared CONFIGURATIONS ${CMAKE_CONFIGURATION_TYPES})
+	# install(FILES $<TARGET_FILE:okFrontPanel::okFrontPanel> DESTINATION ${GUI_BIN_DIR}/shared CONFIGURATIONS ${CMAKE_CONFIGURATION_TYPES})
 	install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/xdaq.bit DESTINATION ${GUI_BIN_DIR}/shared)
 elseif(LINUX)
-	install(FILES $<TARGET_FILE:okFrontPanel::okFrontPanel> DESTINATION ${GUI_BIN_DIR}/shared)
+	# install(FILES $<TARGET_FILE:okFrontPanel::okFrontPanel> DESTINATION ${GUI_BIN_DIR}/shared)
 	install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/xdaq.bit DESTINATION ${GUI_BIN_DIR}/shared)
 elseif(APPLE)
-	install(FILES $<TARGET_FILE:okFrontPanel::okFrontPanel> DESTINATION $ENV{HOME}/Library/Application\ Support/open-ephys/shared-api8)
+	# install(FILES $<TARGET_FILE:okFrontPanel::okFrontPanel> DESTINATION $ENV{HOME}/Library/Application\ Support/open-ephys/shared-api8)
+	install(FILES ${ZeroMQ_LIBRARY} DESTINATION $ENV{HOME}/Library/Application\ Support/open-ephys/shared-api8)
 	install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/xdaq.bit DESTINATION $ENV{HOME}/Library/Application\ Support/open-ephys/shared-api8)
 endif()

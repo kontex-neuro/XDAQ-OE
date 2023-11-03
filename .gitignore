@@ -12,3 +12,4 @@
 !**/Build/CMAKE_README.txt
 
 /.vscode
+/.cache

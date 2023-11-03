@@ -29,6 +29,7 @@ add_sources(${PLUGIN_NAME}
 	ImpedanceMeter.h
 	ImpedanceMeter.cpp
 	XDAQ.h
+	xdaqprotocol.h
 )
 
 

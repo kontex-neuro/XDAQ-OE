@@ -318,7 +318,7 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
     }
 
     CHECK_EXIT;
-    board->evalBoard->setContinuousRunMode(false);
+    // board->evalBoard->setContinuousRunMode(false);
     board->evalBoard->setMaxTimeStep(SAMPLES_PER_DATA_BLOCK * numBlocks);
 
     // Create matrices of doubles of size (numStreams x 32 x 3) to store complex amplitudes
@@ -348,6 +348,8 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
     // We execute three complete electrode impedance measurements: one each with
     // Cseries set to 0.1 pF, 1 pF, and 10 pF.  Then we select the best measurement
     // for each channel so that we achieve a wide impedance measurement range.
+    std::vector<unsigned char> data_buffer(board->evalBoard->get_sample_size<char>() *
+                                           SAMPLES_PER_DATA_BLOCK * numBlocks);
     for (int capRange = 0; capRange < 3; ++capRange) {
         switch (capRange) {
         case 0: board->chipRegisters.setZcheckScale(Rhd2000Registers::ZcheckCs100fF); break;
@@ -365,7 +367,7 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
             // Upload version with no ADC calibration to AuxCmd3 RAM Bank 1.
             board->evalBoard->uploadCommandList(commands, Rhd2000EvalBoard::AuxCmdSlot::AuxCmd3, 3);
 
-            board->evalBoard->run();
+            // board->evalBoard->run();
             while (board->evalBoard->isRunning())
                 ;
             if (board->evalBoard->get_num_samples_available(true) !=
@@ -373,7 +375,10 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
                 std::cerr << "Error: Did not receive enough data from board.\n";
                 return std::nullopt;
             }
-            auto db = board->evalBoard->read_samples(SAMPLES_PER_DATA_BLOCK * numBlocks);
+            // board->evalBoard->read_to_buffer(SAMPLES_PER_DATA_BLOCK * numBlocks, nullptr);
+            auto db = Rhd2000DataBlock(board->evalBoard->getNumEnabledDataStreams(),
+                                       SAMPLES_PER_DATA_BLOCK * numBlocks,
+                                       board->evalBoard->get_dio32(), data_buffer.data());
 
             for (int stream = 0; stream < numdataStreams; ++stream) {
                 setProgress(float(capRange) / 3.0f +
@@ -381,7 +386,7 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
                             (float(stream) / float(numdataStreams) / 32.0f / 3.0f));
 
                 const auto r = measureComplexAmplitude(
-                    {&db->amp[(stream * 32 + channel) * SAMPLES_PER_DATA_BLOCK * numBlocks],
+                    {&db.amp[(stream * 32 + channel) * SAMPLES_PER_DATA_BLOCK * numBlocks],
                      static_cast<std::size_t>(SAMPLES_PER_DATA_BLOCK * numBlocks)},
                     numBlocks, board->settings.boardSampleRate, actualImpedanceFreq, numPeriods);
                 measuredMagnitude[stream][channel % 32][capRange] = std::abs(r);
@@ -453,10 +458,10 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
 
 void ImpedanceMeter::restoreBoardSettings()
 {
-    board->evalBoard->setContinuousRunMode(false);
+    // board->evalBoard->setContinuousRunMode(false);
     board->evalBoard->setMaxTimeStep(0);
-    board->evalBoard->flush();
-    // Switch back to flatline
+    // board->evalBoard->flush();
+    //  Switch back to flatline
     board->evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::SPIPort::All,
                                            Rhd2000EvalBoard::AuxCmdSlot::AuxCmd1, 0);
     board->evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmdSlot::AuxCmd1, 0, 1);

@@ -1,3 +1,6 @@
 [submodule "third_party/fmt"]
 	path = third_party/fmt
 	url = https://github.com/fmtlib/fmt.git
+[submodule "third_party/zpp_bits"]
+	path = third_party/zpp_bits
+	url = https://github.com/eyalz800/zpp_bits.git

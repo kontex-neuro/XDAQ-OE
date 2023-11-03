@@ -21,12 +21,11 @@
 
 */
 
+#include "rhythm-api/rhd2000datablock.h"
 #ifdef _WIN32
 #define NOMINMAX
 #endif
 
-
-#include "DeviceThread.h"
 
 #include <fmt/format.h>
 
@@ -35,6 +34,7 @@
 #include <chrono>
 
 #include "DeviceEditor.h"
+#include "DeviceThread.h"
 #include "Headstage.h"
 #include "ImpedanceMeter.h"
 #include "rhythm-api/utils.h"
@@ -264,58 +264,16 @@ bool DeviceThread::openBoard(String pathToLibrary)
     return deviceFound;
 }
 
-bool DeviceThread::uploadBitfile(String bitfilename)
-{
-    deviceFound = true;
-
-    if (!evalBoard->uploadFpgaBitfile(bitfilename.toStdString())) {
-        LOGD("Couldn't upload bitfile from ", bitfilename);
-
-        bool response =
-            AlertWindow::showOkCancelBox(AlertWindow::NoIcon, "FPGA bitfile not found.",
-                                         "The xdaq.bit file was not found in the directory of the "
-                                         "executable. Would you like to browse for it?",
-                                         "Yes", "No", 0, 0);
-        if (response) {
-            // browse for file
-            FileChooser fc("Select the FPGA bitfile...", File::getCurrentWorkingDirectory(),
-                           "*.bit", true);
-
-            if (fc.browseForFileToOpen()) {
-                File currentFile = fc.getResult();
-
-                uploadBitfile(currentFile.getFullPathName());  // call recursively
-            } else {
-                deviceFound = false;
-            }
-
-        } else {
-            deviceFound = false;
-        }
-    }
-
-    return deviceFound;
-}
-
 void DeviceThread::initializeBoard()
 {
-    String bitfilename;
-
     File sharedDir = CoreServices::getSavedStateDirectory();
-	if(!sharedDir.getFullPathName().contains("plugin-GUI" + File::getSeparatorString() + "Build"))
-		sharedDir = sharedDir.getChildFile("shared-api" + String(PLUGIN_API_VER));
-	else
-		sharedDir = sharedDir.getChildFile("shared");
-
-    bitfilename = sharedDir.getFullPathName() + File::getSeparatorString() + "xdaq.bit";
-
-    if (!uploadBitfile(bitfilename)) {
-        return;
-    }
+    if (!sharedDir.getFullPathName().contains("plugin-GUI" + File::getSeparatorString() + "Build"))
+        sharedDir = sharedDir.getChildFile("shared-api" + String(PLUGIN_API_VER));
+    else
+        sharedDir = sharedDir.getChildFile("shared");
 
     // Initialize the board
     LOGD("Initializing XDAQ.");
-    evalBoard->initialize();
     // This applies the following settings:
     //  - sample rate to 30 kHz
     //  - aux command banks to zero
@@ -331,27 +289,35 @@ void DeviceThread::initializeBoard()
 
     setSampleRate(Rhd2000EvalBoard::SampleRate::s30000Hz);
 
-    evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortA, settings.cableLength.portA);
-    evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortB, settings.cableLength.portB);
-    evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortC, settings.cableLength.portC);
-    evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortD, settings.cableLength.portD);
-    evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortE, settings.cableLength.portE);
-    evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortF, settings.cableLength.portF);
-    evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortG, settings.cableLength.portG);
-    evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortH, settings.cableLength.portH);
+    // evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortA,
+    // settings.cableLength.portA);
+    // evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortB,
+    // settings.cableLength.portB);
+    // evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortC,
+    // settings.cableLength.portC);
+    // evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortD,
+    // settings.cableLength.portD);
+    // evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortE,
+    // settings.cableLength.portE);
+    // evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortF,
+    // settings.cableLength.portF);
+    // evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortG,
+    // settings.cableLength.portG);
+    // evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortH,
+    // settings.cableLength.portH);
 
     // Select RAM Bank 0 for AuxCmd3 initially, so the ADC is calibrated.
-    evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::SPIPort::All,
-                                    Rhd2000EvalBoard::AuxCmdSlot::AuxCmd3, 0);
+    // evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::SPIPort::All,
+    //                                 Rhd2000EvalBoard::AuxCmdSlot::AuxCmd3, 0);
 
     // Since our longest command sequence is 60 commands, run the SPI interface for
     // 60 samples (64 for usb3 power-of two needs)
-    auto db = evalBoard->run_and_read_samples(INIT_STEP);
+    // auto db = evalBoard->run_and_read_samples(INIT_STEP);
     // Now that ADC calibration has been performed, we switch to the command sequence
     // that does not execute ADC calibration.
-    evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::SPIPort::All,
-                                    Rhd2000EvalBoard::AuxCmdSlot::AuxCmd3,
-                                    settings.fastSettleEnabled ? 2 : 1);
+    // evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::SPIPort::All,
+    //                                 Rhd2000EvalBoard::AuxCmdSlot::AuxCmd3,
+    //                                 settings.fastSettleEnabled ? 2 : 1);
 
     adcChannelNames.clear();
     ttlLineNames.clear();
@@ -402,14 +368,14 @@ void DeviceThread::scanPorts()
     LOGD("Number of enabled data streams: ", evalBoard->getNumEnabledDataStreams());
 
     using SPIPort = Rhd2000EvalBoard::SPIPort;
-    settings.cableLength.portA = evalBoard->estimate_cable_length_meters(SPIPort::PortA);
-    settings.cableLength.portB = evalBoard->estimate_cable_length_meters(SPIPort::PortB);
-    settings.cableLength.portC = evalBoard->estimate_cable_length_meters(SPIPort::PortC);
-    settings.cableLength.portD = evalBoard->estimate_cable_length_meters(SPIPort::PortD);
-    settings.cableLength.portE = evalBoard->estimate_cable_length_meters(SPIPort::PortE);
-    settings.cableLength.portF = evalBoard->estimate_cable_length_meters(SPIPort::PortF);
-    settings.cableLength.portG = evalBoard->estimate_cable_length_meters(SPIPort::PortG);
-    settings.cableLength.portH = evalBoard->estimate_cable_length_meters(SPIPort::PortH);
+    // settings.cableLength.portA = evalBoard->estimate_cable_length_meters(SPIPort::PortA);
+    // settings.cableLength.portB = evalBoard->estimate_cable_length_meters(SPIPort::PortB);
+    // settings.cableLength.portC = evalBoard->estimate_cable_length_meters(SPIPort::PortC);
+    // settings.cableLength.portD = evalBoard->estimate_cable_length_meters(SPIPort::PortD);
+    // settings.cableLength.portE = evalBoard->estimate_cable_length_meters(SPIPort::PortE);
+    // settings.cableLength.portF = evalBoard->estimate_cable_length_meters(SPIPort::PortF);
+    // settings.cableLength.portG = evalBoard->estimate_cable_length_meters(SPIPort::PortG);
+    // settings.cableLength.portH = evalBoard->estimate_cable_length_meters(SPIPort::PortH);
 
     setSampleRate(settings.savedSampleRate);  // restore saved sample rate
 }
@@ -652,7 +618,7 @@ double DeviceThread::setUpperBandwidth(double upper)
 
     settings.dsp.upperBandwidth = upper;
 
-    updateRegisters();
+    // updateRegisters();
 
     return settings.dsp.upperBandwidth;
 }
@@ -663,7 +629,7 @@ double DeviceThread::setLowerBandwidth(double lower)
 
     settings.dsp.lowerBandwidth = lower;
 
-    updateRegisters();
+    // updateRegisters();
 
     return settings.dsp.lowerBandwidth;
 }
@@ -674,7 +640,7 @@ double DeviceThread::setDspCutoffFreq(double freq)
 
     settings.dsp.cutoffFreq = freq;
 
-    updateRegisters();
+    // updateRegisters();
 
     return settings.dsp.cutoffFreq;
 }
@@ -687,7 +653,7 @@ void DeviceThread::setDSPOffset(bool state)
 
     settings.dsp.enabled = state;
 
-    updateRegisters();
+    // updateRegisters();
 }
 
 void DeviceThread::setTTLoutputMode(bool state)
@@ -769,7 +735,7 @@ void DeviceThread::enableAuxs(bool t)
 {
     settings.acquireAux = t;
     sourceBuffers[0]->resize(getNumChannels(), 10000);
-    updateRegisters();
+    // updateRegisters();
 }
 
 void DeviceThread::enableAdcs(bool t)
@@ -869,130 +835,23 @@ void DeviceThread::setSampleRate(Rhd2000EvalBoard::SampleRate sampleRate, bool i
 
     // Now that we have set our sampling rate, we can set the MISO sampling delay
     // which is dependent on the sample rate.
-    evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortA, settings.cableLength.portA);
-    evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortB, settings.cableLength.portB);
-    evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortC, settings.cableLength.portC);
-    evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortD, settings.cableLength.portD);
-    evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortE, settings.cableLength.portE);
-    evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortF, settings.cableLength.portF);
-    evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortG, settings.cableLength.portG);
-    evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortH, settings.cableLength.portH);
-
-    updateRegisters();
+    // evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortA,
+    // settings.cableLength.portA);
+    // evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortB,
+    // settings.cableLength.portB);
+    // evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortC,
+    // settings.cableLength.portC);
+    // evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortD,
+    // settings.cableLength.portD);
+    // evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortE,
+    // settings.cableLength.portE);
+    // evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortF,
+    // settings.cableLength.portF);
+    // evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortG,
+    // settings.cableLength.portG);
+    // evalBoard->setCableLengthMeters(Rhd2000EvalBoard::SPIPort::PortH,
+    // settings.cableLength.portH);
 }
-
-void DeviceThread::updateRegisters()
-{
-    if (!deviceFound)  // Safety to avoid crashes loading a chain with Rythm node withouth a board
-    {
-        return;
-    }
-    // Set up an RHD2000 register object using this sample rate to
-    // optimize MUX-related register settings.
-    chipRegisters.defineSampleRate(settings.boardSampleRate);
-
-    // Create a command list for the AuxCmd1 slot.  This command sequence will continuously
-    // update Register 3, which controls the auxiliary digital output pin on each RHD2000 chip.
-    // In concert with the v1.4 Rhythm FPGA code, this permits real-time control of the digital
-    // output pin on chips on each SPI port.
-    chipRegisters.setDigOutLow();  // Take auxiliary output out of HiZ mode.
-    {
-        const auto commands = chipRegisters.createCommandListUpdateDigOut();
-        evalBoard->uploadCommandList(commands, Rhd2000EvalBoard::AuxCmdSlot::AuxCmd1, 0);
-        evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmdSlot::AuxCmd1, 0,
-                                          commands.size() - 1);
-        evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::SPIPort::All,
-                                        Rhd2000EvalBoard::AuxCmdSlot::AuxCmd1, 0);
-    }
-
-    // Next, we'll create a command list for the AuxCmd2 slot.  This command sequence
-    // will sample the temperature sensor and other auxiliary ADC inputs.
-    {
-        const auto commands = chipRegisters.createCommandListTempSensor();
-        evalBoard->uploadCommandList(commands, Rhd2000EvalBoard::AuxCmdSlot::AuxCmd2, 0);
-        evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmdSlot::AuxCmd2, 0,
-                                          commands.size() - 1);
-        evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::SPIPort::All,
-                                        Rhd2000EvalBoard::AuxCmdSlot::AuxCmd2, 0);
-    }
-
-    // Before generating register configuration command sequences, set amplifier
-    // bandwidth paramters.
-    settings.dsp.cutoffFreq = chipRegisters.setDspCutoffFreq(settings.dsp.cutoffFreq);
-    settings.dsp.lowerBandwidth = chipRegisters.setLowerBandwidth(settings.dsp.lowerBandwidth);
-    settings.dsp.upperBandwidth = chipRegisters.setUpperBandwidth(settings.dsp.upperBandwidth);
-    chipRegisters.enableDsp(settings.dsp.enabled);
-
-    // enable/disable aux inputs:
-    chipRegisters.enableAux1(settings.acquireAux);
-    chipRegisters.enableAux2(settings.acquireAux);
-    chipRegisters.enableAux3(settings.acquireAux);
-
-    // Upload version with ADC calibration to AuxCmd3 RAM Bank 0.
-    {
-        const auto commands = chipRegisters.createCommandListRegisterConfig(true);
-        evalBoard->uploadCommandList(commands, Rhd2000EvalBoard::AuxCmdSlot::AuxCmd3, 0);
-        evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmdSlot::AuxCmd3, 0,
-                                          commands.size() - 1);
-    }
-    // Upload version with no ADC calibration to AuxCmd3 RAM Bank 1.
-    {
-        const auto commands = chipRegisters.createCommandListRegisterConfig(false);
-        evalBoard->uploadCommandList(commands, Rhd2000EvalBoard::AuxCmdSlot::AuxCmd3, 1);
-        evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmdSlot::AuxCmd3, 0,
-                                          commands.size() - 1);
-    }
-
-    // Upload version with fast settle enabled to AuxCmd3 RAM Bank 2.
-    chipRegisters.setFastSettle(true);
-    {
-        const auto commands = chipRegisters.createCommandListRegisterConfig(false);
-        evalBoard->uploadCommandList(commands, Rhd2000EvalBoard::AuxCmdSlot::AuxCmd3, 2);
-        evalBoard->selectAuxCommandLength(Rhd2000EvalBoard::AuxCmdSlot::AuxCmd3, 0,
-                                          commands.size() - 1);
-    }
-    chipRegisters.setFastSettle(false);
-
-    evalBoard->selectAuxCommandBank(Rhd2000EvalBoard::SPIPort::All,
-                                    Rhd2000EvalBoard::AuxCmdSlot::AuxCmd3,
-                                    settings.fastSettleEnabled ? 2 : 1);
-}
-
-// void DeviceThread::setCableLength(int hsNum, float length)
-// {
-//     // Set the MISO sampling delay, which is dependent on the sample rate.
-//
-//     switch (hsNum)
-//     {
-//         case 0:
-//             evalBoard->setCableLengthFeet(Rhd2000EvalBoard::PortA, length);
-//             break;
-//         case 1:
-//             evalBoard->setCableLengthFeet(Rhd2000EvalBoard::PortB, length);
-//             break;
-//         case 2:
-//             evalBoard->setCableLengthFeet(Rhd2000EvalBoard::PortC, length);
-//             break;
-//         case 3:
-//             evalBoard->setCableLengthFeet(Rhd2000EvalBoard::PortD, length);
-//             break;
-//         case 4:
-//             evalBoard->setCableLengthFeet(Rhd2000EvalBoard::PortE, length);
-//             break;
-//         case 5:
-//             evalBoard->setCableLengthFeet(Rhd2000EvalBoard::PortF, length);
-//             break;
-//         case 6:
-//             evalBoard->setCableLengthFeet(Rhd2000EvalBoard::PortG, length);
-//             break;
-//         case 7:
-//             evalBoard->setCableLengthFeet(Rhd2000EvalBoard::PortH, length);
-//             break;
-//         default:
-//             break;
-//     }
-//
-// }
 
 bool DeviceThread::startAcquisition()
 {
@@ -1007,19 +866,73 @@ bool DeviceThread::startAcquisition()
         TTL_OUTPUT_STATE[k] = 0;
     }
 
-    evalBoard->flush();
-    evalBoard->setContinuousRunMode(true);
-    evalBoard->run();
+    assert(current_block == nullptr);
+    const int numStreams = evalBoard->getNumEnabledDataStreams();
+    // const int chunk_size = 32;
+    const int chunk_size = 1;
+    current_block = new Rhd2000DataBlock(numStreams, chunk_size, evalBoard->get_dio32());
+
+    // evalBoard->flush();
+    evalBoard->run([&](std::span<const std::byte> data) {
+        const auto sample_size = evalBoard->get_sample_size<char>();
+        const auto block_size = sample_size * SAMPLES_PER_DATA_BLOCK;
+        auto datastart = data.data();
+        const auto blocks = data.size() / block_size;
+
+        const auto chunks = SAMPLES_PER_DATA_BLOCK / current_block->num_samples;
+        const auto chunk_size = current_block->num_samples * sample_size;
+
+        constexpr auto ll = 32;
+        for (int block = 0; block < blocks; ++block, datastart += block_size) {
+            for (int chunk = 0; chunk < chunks; ++chunk) {
+                if (!current_block->from_buffer((const unsigned char *) datastart +
+                                                chunk * chunk_size)) {
+                    throw std::runtime_error("Failed to parse block");
+                }
+                const int num_samples = current_block->num_samples;
+                // tranpose data from Time x Channel x Stream to Time x Stream x Channel
+                auto target = output_buffer.begin();
+                const auto num_streams = isddrstream.size() - 1;
+                for (int s = 0; s < current_aquisition_streams; ++s) {
+                    target =
+                        std::copy(current_block->amp.begin() + s * 32 * num_samples,
+                                  current_block->amp.begin() + (s + 1) * 32 * num_samples, target);
+                    if (!settings.acquireAux | (!isddrstream[s] && isddrstream[s + 1])) continue;
+
+                    for (int c = 0; c < 3; ++c) {
+                        auto &current_aux_buffer = auxBuffer[s * 3 + c];
+                        for (int t = 0; t < num_samples; ++t) {
+                            // aux is offset by 1
+                            const int aux = (current_block->timeStamp[t] + 3) % 4;
+                            // update aux buffer with new value that sampled every 4th sample
+                            if (aux == c)
+                                current_aux_buffer =
+                                    IntanChip::aux2V(current_block->aux[1][s * num_samples + t]);
+                            // oversampleing by 4 times
+                            *target++ = current_aux_buffer;
+                        }
+                    }
+                }
+
+                if (settings.acquireAdc) {
+                    std::copy(current_block->adc.begin(), current_block->adc.end(), target);
+                }
+
+                auto ts = std::vector<double>(num_samples, 0);
+                // Not ideal to cast into another vector, but it's more convenient to switch between
+                // 16 / 32 channels
+                auto ttl = std::vector<unsigned long long>(num_samples);
+                std::transform(current_block->ttlIn.begin(), current_block->ttlIn.end(),
+                               ttl.begin(), [](auto t) { return t; });
+                sourceBuffers[0]->addToBuffer(&output_buffer[0], &current_block->timeStamp[0],
+                                              &ts[0], &ttl[0], num_samples, num_samples);
+            }
+        }
+    });
 
     // LOGD("Expecting blocksize of ", blockSize, " for ", evalBoard->getNumEnabledDataStreams(), "
     // streams");
 
-    assert(current_block == nullptr);
-    const int numStreams = evalBoard->getNumEnabledDataStreams();
-
-    // const int chunk_size = 32;
-    const int chunk_size = 1;
-    current_block = new Rhd2000DataBlock(numStreams, chunk_size, evalBoard->get_dio32());
 
     assert(isddrstream.size() == 0);
     int nonddr = 0;
@@ -1033,7 +946,6 @@ bool DeviceThread::startAcquisition()
     current_aquisition_streams = evalBoard->getNumEnabledDataStreams();
     current_aquisition_channels = (32 * numStreams + nonddr * 3 * settings.acquireAux +
                                    +settings.acquireAdc * evalBoard->ports.num_of_adc);
-    data_buffer.resize(evalBoard->get_sample_size<char>() * SAMPLES_PER_DATA_BLOCK * 4);
     output_buffer.resize(current_aquisition_channels * chunk_size);
     // output_buffer.resize(current_aquisition_channels * 300);
 
@@ -1059,10 +971,10 @@ bool DeviceThread::stopAcquisition()
     }
 
     if (deviceFound) {
-        evalBoard->setContinuousRunMode(false);
         evalBoard->setMaxTimeStep(0);
+        evalBoard->stop();
         LOGD("Flushing FIFO.");
-        evalBoard->flush();
+        // evalBoard->flush();
     }
 
     sourceBuffers[0]->clear();
@@ -1076,7 +988,6 @@ bool DeviceThread::stopAcquisition()
     // remove commands
     while (!digitalOutputCommands.empty()) digitalOutputCommands.pop();
 
-    delete current_block;
     current_block = nullptr;
     isddrstream.clear();
     current_aquisition_channels = 0;
@@ -1088,90 +999,8 @@ bool DeviceThread::stopAcquisition()
 
 bool DeviceThread::updateBuffer()
 {
-    // using Clock = std::chrono::high_resolution_clock;
-    // static auto sumtime = 0.0;
-    // static auto measurementCount = 0;
-    const int samples_available = evalBoard->get_num_samples_available(true);
-    if (samples_available > SAMPLES_PER_DATA_BLOCK * 4) {
-        evalBoard->read_to_buffer(SAMPLES_PER_DATA_BLOCK * 4, &data_buffer[0]);
-        const auto chunk_buffer_size =
-            evalBoard->get_sample_size<char>() * current_block->num_samples;
-        for (int chunk = 0; chunk < SAMPLES_PER_DATA_BLOCK * 4 / current_block->num_samples;
-             ++chunk) {
-            // auto start_time = Clock::now();
-            // const auto all_start_time = start_time;
-
-            current_block->from_buffer(&data_buffer[chunk_buffer_size * chunk]);
-            // auto rbt =
-            //     std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start_time)
-            //         .count();
-            // sumtime += rbt;
-            // ++measurementCount;
-            const int num_samples = current_block->num_samples;
-            // if (chunk == (SAMPLES_PER_DATA_BLOCK * 4 / current_block->num_samples - 1))
-            //    fmt::print("read {} samples in {} ns avg {:.0f} us/samp, {} to go", num_samples,
-            //               rbt, sumtime / measurementCount / num_samples, samples_available);
-            // start_time = Clock::now();
-
-
-            // tranpose data from Time x Channel x Stream to Time x Stream x Channel
-            auto target = output_buffer.begin();
-            const auto num_streams = isddrstream.size() - 1;
-            for (int s = 0; s < current_aquisition_streams; ++s) {
-                target = std::copy(current_block->amp.begin() + s * 32 * num_samples,
-                                   current_block->amp.begin() + (s + 1) * 32 * num_samples, target);
-                if (!settings.acquireAux | (!isddrstream[s] && isddrstream[s + 1])) continue;
-
-                for (int c = 0; c < 3; ++c) {
-                    auto &current_aux_buffer = auxBuffer[s * 3 + c];
-                    for (int t = 0; t < num_samples; ++t) {
-                        // aux is offset by 1
-                        const int aux = (current_block->timeStamp[t] + 3) % 4;
-                        // update aux buffer with new value that sampled every 4th sample
-                        if (aux == c)
-                            current_aux_buffer =
-                                IntanChip::aux2V(current_block->aux[1][s * num_samples + t]);
-                        // oversampleing by 4 times
-                        *target++ = current_aux_buffer;
-                    }
-                }
-            }
-
-            if (settings.acquireAdc) {
-                std::copy(current_block->adc.begin(), current_block->adc.end(), target);
-            }
-
-            auto ts = std::vector<double>(num_samples, 0);
-            // Not ideal to cast into another vector, but it's more convenient to switch between
-            // 16 / 32 channels
-            auto ttl = std::vector<unsigned long long>(num_samples);
-            std::transform(current_block->ttlIn.begin(), current_block->ttlIn.end(), ttl.begin(),
-                           [](auto t) { return t; });
-
-            // if (chunk == (SAMPLES_PER_DATA_BLOCK * 4 / current_block->num_samples - 1))
-            //     fmt::print("Trans {} ns ", std::chrono::duration_cast<std::chrono::nanoseconds>(
-            //                                    Clock::now() - start_time)
-            //                                    .count());
-            // start_time = Clock::now();
-
-            sourceBuffers[0]->addToBuffer(&output_buffer[0], &current_block->timeStamp[0], &ts[0],
-                                          &ttl[0], num_samples, num_samples);
-
-            // if (chunk == (SAMPLES_PER_DATA_BLOCK * 4 / current_block->num_samples - 1))
-            //     fmt::print(
-            //         "Added to buffer {} ns / sample , Total={}\n",
-            //         std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() -
-            //         start_time)
-            //                 .count() /
-            //             num_samples,
-            //         std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() -
-            //                                                              all_start_time)
-            //                 .count() /
-            //             num_samples);
-        }
-    }
-
-    if (updateSettingsDuringAcquisition) {
+    // if (updateSettingsDuringAcquisition) {
+    if (false) {
         LOGD("DAC");
         for (int k = 0; k < 8; k++) {
             if (dacChannelsToUpdate[k]) {

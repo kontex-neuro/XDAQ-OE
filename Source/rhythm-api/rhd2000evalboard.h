@@ -36,18 +36,18 @@
 
 #define MAX_DIO 32
 
-#ifdef UseMockOkFrontPanel
-#include "mock_okCFrontPanel.h"
-#endif
-
+#include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <queue>
 #include <string>
+#include <thread>
+#include <zmq.hpp>
 
-#include "okFrontPanelDLL.h"
+// #include "okFrontPanelDLL.h"
 #include "ports.h"
 #include "rhd2000datablock.h"
 
@@ -67,8 +67,6 @@ public:
 
 
     int open(const char *libname);
-    bool uploadFpgaBitfile(std::string filename);
-    void initialize();
 
     int FPGA_board;
     bool usb3;
@@ -124,39 +122,21 @@ public:
     void selectAuxCommandBank(SPIPort port, AuxCmdSlot auxCommandSlot, int bank);
     void selectAuxCommandLength(AuxCmdSlot auxCommandSlot, int loopIndex, int endIndex);
 
-    void resetBoard();
-    void resetFpga();
-    void setContinuousRunMode(bool continuousMode);
     void setMaxTimeStep(unsigned int maxTimeStep);
-    void run();
+    void run(std::function<void(std::span<const std::byte>)> callback);
+    void stop();
     bool isRunning();
-
-    void setCableDelay(SPIPort port, int delay);
-    void setCableLengthMeters(SPIPort port, double lengthInMeters);
-    void setCableLengthFeet(SPIPort port, double lengthInFeet);
-    double estimateCableLengthMeters(int delay) const;
-    double estimateCableLengthFeet(int delay) const;
-
-    void setDspSettle(bool enabled);
-    void setAllDacsToZero();
 
     void enableDataStream(int stream, bool enabled);
     int getNumEnabledDataStreams() const { return numDataStreams; }
 
-    void clearTtlOut();
     void setTtlOut(int ttlOutArray[]);
-    void getTtlIn(int ttlInArray[]);
 
-    void setDacManual(int value);
-
-    void setLedDisplay(int ledArray[]);
     void setSpiLedDisplay(int ledArray[]);
 
     void enableDac(int dacChannel, bool enabled);
     void setDacGain(int gain);
     void setAudioNoiseSuppress(int noiseSuppress);
-    void selectDacDataStream(int dacChannel, int stream);
-    void selectDacDataChannel(int dacChannel, int dataChannel);
 
     /**
      * @brief
@@ -183,8 +163,6 @@ public:
     void setDacThreshold(int dacChannel, int threshold, bool trigPolarity);
     void setTtlMode(int mode);
 
-    void flush();
-
     template <typename Unit>
     std::size_t get_sample_size()
     {
@@ -202,26 +180,20 @@ public:
         return get_fifo_data_size<char>(update) / get_sample_size<char>();
     }
 
-    std::optional<Rhd2000DataBlock> run_and_read_samples(
-        int samples, std::optional<std::chrono::milliseconds> timeout = std::nullopt);
-    std::optional<Rhd2000DataBlock> read_samples(int samples);
+    // std::optional<Rhd2000DataBlock> run_and_read_samples(
+    //     int samples, std::optional<std::chrono::milliseconds> timeout = std::nullopt);
+    // std::optional<Rhd2000DataBlock> read_samples(int samples);
 
-    int read_to_buffer(int samples, unsigned char *buffer);
+    // int read_to_buffer(int samples, unsigned char *buffer);
 
-    bool readDataBlocks(int numBlocks, std::queue<Rhd2000DataBlock> &dataQueue);
 
-    int getBoardMode();
     int getCableDelay(SPIPort port) const;
     void getCableDelay(std::vector<int> &delays) const;
-
-    void setDacRerefSource(int stream, int channel);
-    void enableDacReref(bool enabled);
 
     // kontexdev
     bool set_dio32(bool dio32);
     bool get_dio32() const { return dio32; }
     bool expander_present() const { return expander; }
-    bool UploadDACData(const std::vector<uint16_t> &commandList, int dacChannel, int length);
 
     enum class XDAQStatus : uint8_t {
         MCU_IDLE = 0x0,
@@ -229,22 +201,16 @@ public:
         MCU_DONE = 0x08,
         MCU_ERROR = 0x10
     };
-    XDAQStatus getXDAQStatus();
     bool isStreamEnabled(int stream) const { return dataStreamEnabled[stream]; }
     const std::vector<IntanChip::Chip> &scan_chips();
     const std::vector<IntanChip::Chip> &get_chips() const { return chips; }
-    const std::vector<int> &get_cable_delays() const { return cableDelay; }
-    const float estimate_cable_length_meters(SPIPort port) const
-    {
-        return estimateCableLengthMeters(cableDelay[static_cast<int>(port)]);
-    }
 
 private:
-#ifdef UseMockOkFrontPanel
-    MockOkCFrontPanel *dev;
-#else
-    okCFrontPanel *dev;
-#endif
+    zmq::context_t context;
+    std::thread receiving_thread;
+    zmq::socket_t socket;
+    zmq::socket_t data_socket;
+    std::atomic_bool running = false;
     const int samples_per_block = SAMPLES_PER_DATA_BLOCK;
     long read_raw_samples(int samples, unsigned char *buffer);
 
@@ -261,13 +227,6 @@ private:
 
     // Methods in this class are designed to be thread-safe.  This variable is used to ensure that.
     std::mutex okMutex;
-
-    // Buffer for reading bytes from USB interface
-    std::vector<unsigned char> usbBuffer;
-    std::string opalKellyModelName(int model) const;
-
-    bool isDcmProgDone() const;
-    bool isDataClockLocked() const;
 
     unsigned int lastNumWordsInFifo = 0;
     unsigned int numWordsInFifo();
