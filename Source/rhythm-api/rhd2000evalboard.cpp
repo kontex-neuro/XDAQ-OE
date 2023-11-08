@@ -21,7 +21,6 @@
 #include "rhd2000evalboard.h"
 
 #include <fmt/format.h>
-#include <xdaq/xdaqprotocol.h>
 
 #include <array>
 #include <chrono>
@@ -36,6 +35,8 @@
 #include <ranges>
 #include <thread>
 #include <vector>
+
+#include "../xdaqprotocol.h"
 
 
 // #include "mock_okCFrontPanel.h"
@@ -77,8 +78,14 @@ template <typename Protocol>
 auto make_rpc(const typename Protocol::Request &request, zmq::socket_t &socket)
 {
     auto msg = make_request<Protocol>(request);
-    socket.send(msg, zmq::send_flags::none);
     zmq::message_t res;
+    zmq::poller_t<> poller;
+    poller.add(socket, zmq::event_flags::pollout | zmq::event_flags::pollin);
+
+    socket.send(msg, zmq::send_flags::none);
+    std::vector<zmq::poller_event<>> events{2};
+    if (!poller.wait_all(events, std::chrono::milliseconds(1000)))
+        throw std::runtime_error("Timeout sending request");
     auto r = socket.recv(res, zmq::recv_flags::none);
     if (!r) throw std::runtime_error("Error in Rhd2000EvalBoard::make_rpc");
     auto data = std::span<const std::byte>(res.data<std::byte>(), res.size());
@@ -109,10 +116,13 @@ Rhd2000EvalBoard::Rhd2000EvalBoard()
 
 Rhd2000EvalBoard::~Rhd2000EvalBoard()
 {
+    fmt::print("~Rhd2000EvalBoard\n");
     if (is_open) {
     }
+    fmt::print("Waiting for receiving thread to join\n");
     running = false;
     if (receiving_thread.joinable()) receiving_thread.join();
+    fmt::print("Receiving thread joined\n");
 }
 
 // Find an Opal Kelly XEM6310-LX45 board attached to a USB port and open it.

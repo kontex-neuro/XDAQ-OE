@@ -113,7 +113,6 @@ add_subdirectory(third_party/fmt EXCLUDE_FROM_ALL)
 find_package(cppzmq)
 # find_package(okFrontPanel REQUIRED)
 find_package(ZeroMQ REQUIRED)
-include(utils)
 message(STATUS "ZeroMQ_INCLUDE_DIR: ${ZeroMQ_INCLUDE_DIR}")
 message(STATUS "ZeroMQ_LIBRARY: ${ZeroMQ_LIBRARY}")
 target_include_directories(${PLUGIN_NAME} PRIVATE

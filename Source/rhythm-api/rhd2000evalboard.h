@@ -56,6 +56,8 @@ class Rhd2000EvalBoard
 public:
     Ports ports = XDAQPortRHD();
     Rhd2000EvalBoard();
+    Rhd2000EvalBoard(const Rhd2000EvalBoard &) = delete;
+    Rhd2000EvalBoard &operator=(const Rhd2000EvalBoard &) = delete;
 
     ~Rhd2000EvalBoard();
 
