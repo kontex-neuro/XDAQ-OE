@@ -881,6 +881,10 @@ bool DeviceThread::startAcquisition()
 
         const auto chunks = SAMPLES_PER_DATA_BLOCK / current_block->num_samples;
         const auto chunk_size = current_block->num_samples * sample_size;
+        if(data.size() % block_size != 0){
+            fmt::print(stderr, "Warning: data size {} is not a multiple of block size {}\n", data.size(), block_size);
+            return;
+        }
 
         constexpr auto ll = 32;
         for (int block = 0; block < blocks; ++block, datastart += block_size) {

@@ -132,9 +132,6 @@ int Rhd2000EvalBoard::open(const char *libname)
     socket = zmq::socket_t(context, zmq::socket_type::req);
     socket.connect("tcp://localhost:5555");
     data_socket = zmq::socket_t(context, zmq::socket_type::sub);
-    data_socket.connect("tcp://localhost:5565");
-    data_socket.set(zmq::sockopt::subscribe, "");
-    // throw std::runtime_error("Not implemented");
     return 1;
 }
 
@@ -234,6 +231,10 @@ void Rhd2000EvalBoard::setMaxTimeStep(unsigned int maxTimeStep)
 // Initiate SPI data acquisition.
 void Rhd2000EvalBoard::run(std::function<void(std::span<const std::byte>)> callback)
 {
+    data_socket = zmq::socket_t(context, zmq::socket_type::sub);
+    data_socket.set(zmq::sockopt::subscribe, "");
+    data_socket.connect("ipc:///tmp/xdaq_data");
+
     if (!isRunning()) make_rpc<protocol::start_run>({}, socket);
     running = false;
     if (receiving_thread.joinable()) {
