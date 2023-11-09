@@ -84,7 +84,7 @@ auto make_rpc(const typename Protocol::Request &request, zmq::socket_t &socket)
 
     socket.send(msg, zmq::send_flags::none);
     std::vector<zmq::poller_event<>> events{2};
-    if (!poller.wait_all(events, std::chrono::milliseconds(1000)))
+    if (!poller.wait_all(events, std::chrono::milliseconds(5000)))
         throw std::runtime_error("Timeout sending request");
     auto r = socket.recv(res, zmq::recv_flags::none);
     if (!r) throw std::runtime_error("Error in Rhd2000EvalBoard::make_rpc");

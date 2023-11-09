@@ -202,6 +202,11 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
         dio32_button->setToggleState(false, dontSendNotification);
         addAndMakeVisible(dio32_button.get());
     }
+    rescanButton->setEnabledState(false);
+    dspoffsetButton->setEnabledState(false);
+    if (dio32_button) {
+        dio32_button->setEnabledState(false);
+    }
 }
 
 
@@ -333,13 +338,13 @@ void DeviceEditor::startAcquisition()
 
 void DeviceEditor::stopAcquisition()
 {
-    rescanButton->setEnabledState(true);
+    // rescanButton->setEnabledState(true);
     auxButton->setEnabledState(true);
     adcButton->setEnabledState(true);
-    dspoffsetButton->setEnabledState(true);
-    if (dio32_button) {
-        dio32_button->setEnabledState(true);
-    }
+    // dspoffsetButton->setEnabledState(true);
+    // if (dio32_button) {
+    //     dio32_button->setEnabledState(true);
+    // }
 
     acquisitionIsActive = false;
 }
@@ -475,6 +480,8 @@ BandwidthInterface::BandwidthInterface(DeviceThread *board_, DeviceEditor *edito
     lowerBandwidthSelection->setColour(Label::textColourId, Colours::darkgrey);
 
     addAndMakeVisible(lowerBandwidthSelection);
+    upperBandwidthSelection->setEnabled(false);
+    lowerBandwidthSelection->setEnabled(false);
 }
 
 
