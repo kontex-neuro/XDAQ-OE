@@ -71,11 +71,12 @@ if (NOT CMAKE_LIBRARY_ARCHITECTURE)
 	endif()
 endif()
 
-target_compile_options(${PLUGIN_NAME} PRIVATE $<$<CONFIG:Debug>:-fsanitize=address>)
-target_link_libraries(${PLUGIN_NAME} $<$<CONFIG:Debug>:-fsanitize=address>)
+# target_compile_options(${PLUGIN_NAME} PRIVATE $<$<CONFIG:Debug>:-fsanitize=address>)
+# target_link_libraries(${PLUGIN_NAME} $<$<CONFIG:Debug>:-fsanitize=address>)
 
 #Libraries and compiler options
 if(MSVC)
+	target_compile_definitions(${PLUGIN_NAME} PRIVATE NOMINMAX)
 	target_link_libraries(${PLUGIN_NAME} ${GUI_BIN_DIR}/open-ephys.lib)
 	target_compile_options(${PLUGIN_NAME} PRIVATE /sdl- /W0)
 	
@@ -111,15 +112,17 @@ foreach( src_file IN ITEMS ${SRC_FILES})
 endforeach()
 
 # additional libraries
-add_subdirectory(third_party/fmt EXCLUDE_FROM_ALL)
-
 find_package(okFrontPanel REQUIRED)
+find_package(xdaq REQUIRED)
+find_package(fmt REQUIRED)
+find_package(nlohmann_json REQUIRED)
 
 target_link_libraries(${PLUGIN_NAME}
-	fmt::fmt-header-only
+	fmt::fmt
 	okFrontPanel::okFrontPanel
+	xdaq::xdaq
+	nlohmann_json::nlohmann_json
 )
-
 if (MSVC)
 	install(FILES $<TARGET_FILE:okFrontPanel::okFrontPanel> DESTINATION ${GUI_BIN_DIR}/shared CONFIGURATIONS ${CMAKE_CONFIGURATION_TYPES})
 	install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/xdaq.bit DESTINATION ${GUI_BIN_DIR}/shared)

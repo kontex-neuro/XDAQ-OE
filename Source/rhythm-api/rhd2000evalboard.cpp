@@ -21,6 +21,7 @@
 #include "rhd2000evalboard.h"
 
 #include <fmt/format.h>
+#include <xdaq/device_plugin.h>
 
 #include <array>
 #include <chrono>
@@ -29,9 +30,11 @@
 #include <iomanip>
 #include <iostream>
 #include <mutex>
+#include <nlohmann/json.hpp>
 #include <queue>
 #include <thread>
 #include <vector>
+
 
 
 // #include "mock_okCFrontPanel.h"
@@ -45,6 +48,7 @@ using std::vector;
 #ifdef Q_OS_WIN
 #include <windows.h>  // for Sleep
 #endif
+using json = nlohmann::json;
 
 // Opal Kelly module USB interface endpoint addresses
 enum OkEndPoint {
@@ -128,49 +132,45 @@ constexpr int WireInDacSource[] = {OkEndPoint::WireInDacSource1, OkEndPoint::Wir
 #define okCFrontPanel MockOkCFrontPanel
 #endif
 
-template <bool update>
-void set_wire_in(okCFrontPanel *dev, int addr, uint32_t value, uint32_t mask = 0xFFFFFFFFu);
-
-template <>
-void set_wire_in<true>(okCFrontPanel *dev, int addr, uint32_t value, uint32_t mask)
-{
-    dev->SetWireInValue(addr, value, mask);
-    dev->UpdateWireIns();
-}
-
-template <>
-void set_wire_in<false>(okCFrontPanel *dev, int addr, uint32_t value, uint32_t mask)
-{
-    dev->SetWireInValue(addr, value, mask);
-}
 
 template <bool update>
-uint32_t get_wire_out(okCFrontPanel *dev, int addr);
+void set_wire_in(xdaq::Device *dev, int addr, uint32_t value, uint32_t mask = 0xFFFFFFFFu);
 
 template <>
-uint32_t get_wire_out<true>(okCFrontPanel *dev, int addr)
+void set_wire_in<true>(xdaq::Device *dev, int addr, uint32_t value, uint32_t mask)
 {
-    dev->UpdateWireOuts();
-    return dev->GetWireOutValue(addr);
+    dev->set_register_sync(addr, value, mask);
 }
 
 template <>
-uint32_t get_wire_out<false>(okCFrontPanel *dev, int addr)
+void set_wire_in<false>(xdaq::Device *dev, int addr, uint32_t value, uint32_t mask)
 {
-    return dev->GetWireOutValue(addr);
+    dev->set_register(addr, value, mask);
 }
 
-inline void send_trigger_in(okCFrontPanel *dev, int trig, int bit, int addr, uint32_t value,
+template <bool update>
+uint32_t get_wire_out(xdaq::Device *dev, int addr);
+
+template <>
+uint32_t get_wire_out<true>(xdaq::Device *dev, int addr)
+{
+    return dev->get_register_sync(addr).value();
+}
+
+template <>
+uint32_t get_wire_out<false>(xdaq::Device *dev, int addr)
+{
+    return dev->get_register(addr);
+}
+
+inline void send_trigger_in(xdaq::Device *dev, int trig, int bit, int addr, uint32_t value,
                             uint32_t mask = 0xFFFFFFFFu)
 {
     set_wire_in<true>(dev, addr, value, mask);
-    dev->ActivateTriggerIn(trig, bit);
+    dev->trigger(trig, bit);
 }
 
-inline void send_trigger_in(okCFrontPanel *dev, int trig, int bit)
-{
-    dev->ActivateTriggerIn(trig, bit);
-}
+inline void send_trigger_in(xdaq::Device *dev, int trig, int bit) { dev->trigger(trig, bit); }
 
 bool Rhd2000EvalBoard::UploadDACData(const vector<uint16_t> &commandList, int dacChannel,
                                      int length)
@@ -184,14 +184,12 @@ bool Rhd2000EvalBoard::UploadDACData(const vector<uint16_t> &commandList, int da
         dacBuffer[2 * i + 1] = (commandList[i] & 0xFF00) >> 8;
     }
 
-    dev->ActivateTriggerIn(0x41, 2);  // reset DAC write counter, set bit2 = 1
-    auto result = dev->WriteToBlockPipeIn(PipeInDAC1 + dacChannel, 16, 2 * words, &dacBuffer[0]);
+    dev->trigger(0x41, 2);  // reset DAC write counter, set bit2 = 1
+    auto result = dev->write(PipeInDAC1 + dacChannel, 2 * words, &dacBuffer[0]);
     if (result < 0) return false;
 
-    dev->SetWireInValue(0x1F, length - 1);  // set loop index
-    dev->UpdateWireIns();
-
-    dev->ActivateTriggerIn(0x41, 8 + dacChannel);  // latch DAC loop index channel 8 => 8+7
+    dev->set_register_sync(0x1F, length - 1);  // set loop index
+    dev->trigger(0x41, 8 + dacChannel);        // latch DAC loop index channel 8 => 8+7
     return true;
 }
 
@@ -199,16 +197,15 @@ bool Rhd2000EvalBoard::UploadDACData(const vector<uint16_t> &commandList, int da
 bool Rhd2000EvalBoard::set_dio32(bool dio32)
 {
     lock_guard<mutex> lockOk(okMutex);
-    set_wire_in<true>(dev, Enable32bitDIO, dio32 * 0x04, 0x04);
-    this->dio32 = dio32;
+    // set_wire_in<true>(dev.get(), Enable32bitDIO, dio32 * 0x04, 0x04);
+    // this->dio32 = dio32;
     return dio32;
 }
 
 
 Rhd2000EvalBoard::XDAQStatus Rhd2000EvalBoard::getXDAQStatus()
 {
-    dev->UpdateWireOuts();
-    auto value = dev->GetWireOutValue(WireOutXDAQStatus);
+    auto value = dev->get_register_sync(WireOutXDAQStatus).value();
     auto is_stat = [](auto v, XDAQStatus s) {
         return (v & static_cast<uint8_t>(s)) == static_cast<uint8_t>(s);
     };
@@ -252,77 +249,25 @@ Rhd2000EvalBoard::~Rhd2000EvalBoard()
 int Rhd2000EvalBoard::open(const char *libname)
 {
     lock_guard<mutex> lockOk(okMutex);
-    char dll_date[32], dll_time[32];
-    string serialNumber = "";
-    int i, nDevices;
+    auto plugin = xdaq::get_plugin("C:/usr/local/bin/xdma_device_plugin.dll");
+    auto devices = json::parse(plugin->list_devices());
+    auto device = devices[0];
+    device["mode"] = "rhd";
+    dev = plugin->create_device(device.dump());
+    // okCFrontPanel::ErrorCode result = dev->OpenBySerial(serialNumber);
+    // // Attempt to open device.
+    // if (result != okCFrontPanel::NoError) {
+    //     delete dev;
+    //     cerr << "Device could not be opened.  Is one connected?" << endl;
+    //     cerr << "Error = " << result << endl;
+    //     return -2;
+    // }
 
-    if (okFrontPanelDLL_LoadLib(libname) == false) {
-        cerr << "FrontPanel DLL could not be loaded.  "
-             << "Make sure this DLL is in the application start directory." << endl;
-        return -1;
-    }
-    okFrontPanelDLL_GetVersion(dll_date, dll_time);
-    cout << "FrontPanel DLL loaded.  Built: " << dll_date << "  " << dll_time << endl;
-#ifdef UseMockOkFrontPanel
-    dev = new MockOkCFrontPanel;
-#else
-    dev = new okCFrontPanel;
-#endif
-
-    cout << endl << "Scanning USB for Opal Kelly devices..." << endl << endl;
-    nDevices = dev->GetDeviceCount();
-    cout << "Found " << nDevices << " Opal Kelly device" << ((nDevices == 1) ? "" : "s")
-         << " connected:" << endl;
-    for (i = 0; i < nDevices; ++i) {
-        cout << "  Device #" << i + 1 << ": Opal Kelly "
-             << opalKellyModelName(dev->GetDeviceListModel(i)).c_str() << " with serial number "
-             << dev->GetDeviceListSerial(i).c_str() << endl;
-    }
-    cout << endl;
-
-    // Find supported device in list of supported XEM boards.
-    for (i = 0; i < nDevices; ++i) {
-        if (dev->GetDeviceListModel(i) == OK_PRODUCT_XEM7310A75) {
-            serialNumber = dev->GetDeviceListSerial(i);
-            FPGA_board = OK_PRODUCT_XEM7310A75;
-            break;
-        }
-
-        else if (dev->GetDeviceListModel(i) == OK_PRODUCT_XEM6010LX45) {
-            serialNumber = dev->GetDeviceListSerial(i);
-            FPGA_board = OK_PRODUCT_XEM6010LX45;
-            usb3 = false;
-            break;
-        }
-
-        else if (dev->GetDeviceListModel(i) == OK_PRODUCT_XEM6310LX45) {
-            serialNumber = dev->GetDeviceListSerial(i);
-            FPGA_board = OK_PRODUCT_XEM6310LX45;
-            usb3 = true;
-            break;
-        }
-    }
-    if (serialNumber == "") {
-        cerr << "No Opal Kelly board found." << endl;
-        return -2;
-    }
-
-    cout << "Attempting to connect to device '" << serialNumber.c_str() << "'\n";
-
-    okCFrontPanel::ErrorCode result = dev->OpenBySerial(serialNumber);
-    // Attempt to open device.
-    if (result != okCFrontPanel::NoError) {
-        delete dev;
-        cerr << "Device could not be opened.  Is one connected?" << endl;
-        cerr << "Error = " << result << endl;
-        return -2;
-    }
-
-    // Get some general information about the XEM.
-    cout << "Opal Kelly device firmware version: " << dev->GetDeviceMajorVersion() << "."
-         << dev->GetDeviceMinorVersion() << endl;
-    cout << "Opal Kelly device serial number: " << dev->GetSerialNumber().c_str() << endl;
-    cout << "Opal Kelly device ID string: " << dev->GetDeviceID().c_str() << endl << endl;
+    // // Get some general information about the XEM.
+    // cout << "Opal Kelly device firmware version: " << dev->GetDeviceMajorVersion() << "."
+    //      << dev->GetDeviceMinorVersion() << endl;
+    // cout << "Opal Kelly device serial number: " << dev->GetSerialNumber().c_str() << endl;
+    // cout << "Opal Kelly device ID string: " << dev->GetDeviceID().c_str() << endl << endl;
 
     return 1;
 }
@@ -330,61 +275,7 @@ int Rhd2000EvalBoard::open(const char *libname)
 // Uploads the configuration file (bitfile) to the FPGA.  Returns true if successful.
 bool Rhd2000EvalBoard::uploadFpgaBitfile(string filename)
 {
-    lock_guard<mutex> lockOk(okMutex);
-    okCFrontPanel::ErrorCode errorCode = dev->ConfigureFPGA(filename);
-
-    switch (errorCode) {
-    case okCFrontPanel::NoError: break;
-    case okCFrontPanel::DeviceNotOpen:
-        cerr << "FPGA configuration failed: Device not open." << endl;
-        return (false);
-    case okCFrontPanel::FileError:
-        cerr << "FPGA configuration failed: Cannot find configuration file." << endl;
-        return (false);
-    case okCFrontPanel::InvalidBitstream:
-        cerr << "FPGA configuration failed: Bitstream is not properly formatted." << endl;
-        return (false);
-    case okCFrontPanel::DoneNotHigh:
-        cerr << "FPGA configuration failed: FPGA DONE signal did not assert after configuration."
-             << endl;
-        return (false);
-    case okCFrontPanel::TransferError:
-        cerr << "FPGA configuration failed: USB error occurred during download." << endl;
-        return (false);
-    case okCFrontPanel::CommunicationError:
-        cerr << "FPGA configuration failed: Communication error with firmware." << endl;
-        return (false);
-    case okCFrontPanel::UnsupportedFeature:
-        cerr << "FPGA configuration failed: Unsupported feature." << endl;
-        return (false);
-    default: cerr << "FPGA configuration failed: Unknown error." << endl; return (false);
-    }
-
-    // Check for Opal Kelly FrontPanel support in the FPGA configuration.
-    if (dev->IsFrontPanelEnabled() == false) {
-        cerr << "Opal Kelly FrontPanel support is not enabled in this FPGA configuration." << endl;
-        delete dev;
-        return (false);
-    }
-
-    dev->UpdateWireOuts();
-    int boardId = dev->GetWireOutValue(WireOutBoardId);
-    int boardVersion = dev->GetWireOutValue(WireOutBoardVersion);
-
-    while (getXDAQStatus() != XDAQStatus::MCU_IDLE)
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-    dev->UpdateWireOuts();
-    expander = (dev->GetWireOutValue(0x35) != 0);
-    // int expanderBoardIdNumber = ((dev->GetWireOutValue(WireOutSerialDigitalIn) & 0x08) ? 1 : 0);
-
-    /*
-    if (boardId != RHYTHM_BOARD_ID) {
-        cerr << "FPGA configuration file does not support Rhythm USB3.  Incorrect board ID: " <<
-    boardId << endl; return(false); } else { cout << "Rhythm USB3 configuration file successfully
-    loaded." << endl << endl;
-    }
-    */
+    expander = true;
     is_open = true;
     return true;
 }
@@ -405,7 +296,7 @@ void Rhd2000EvalBoard::initialize()
     setDspSettle(false);
 
     // Must first force all data streams off
-    set_wire_in<true>(dev, WireInDataStreamEn, 0);
+    set_wire_in<true>(dev.get(), WireInDataStreamEn, 0);
 
     enableDataStream(0, true);  // start with only one data stream enabled
     for (int i = 1; i < MAX_NUM_DATA_STREAMS; i++) {
@@ -573,15 +464,13 @@ bool Rhd2000EvalBoard::setSampleRate(SampleRate newSampleRate)
     sampleRate = newSampleRate;
 
     // Wait for DcmProgDone = 1 before reprogramming clock synthesizer
-    while (isDcmProgDone() == false)
-        ;
+    while (isDcmProgDone() == false);
 
     // Reprogram clock synthesizer
-    send_trigger_in(dev, TrigInConfig, 0, WireInDataFreqPll, (256 * M + D));
+    send_trigger_in(dev.get(), TrigInConfig, 0, WireInDataFreqPll, (256 * M + D));
 
     // Wait for DataClkLocked = 1 before allowing data acquisition to continue
-    while (isDataClockLocked() == false)
-        ;
+    while (isDataClockLocked() == false);
 
     return true;
 }
@@ -629,11 +518,11 @@ void Rhd2000EvalBoard::uploadCommandList(const std::vector<uint32_t> &commandLis
         return;
     }
 
-    set_wire_in<false>(dev, WireInCmdRamBank, bank);
+    set_wire_in<false>(dev.get(), WireInCmdRamBank, bank);
     const auto aux = static_cast<int>(auxCommandSlot);
     for (size_t i = 0; i < commandList.size(); ++i) {
-        set_wire_in<false>(dev, WireInCmdRamData, commandList[i]);
-        send_trigger_in(dev, TrigInConfig, aux + 1, WireInCmdRamAddr, i);
+        set_wire_in<false>(dev.get(), WireInCmdRamData, commandList[i]);
+        send_trigger_in(dev.get(), TrigInConfig, aux + 1, WireInCmdRamAddr, i);
     }
 }
 
@@ -658,9 +547,10 @@ void Rhd2000EvalBoard::selectAuxCommandBank(SPIPort port, AuxCmdSlot auxCommandS
         mask = 0xf << static_cast<int>(port) * 4;
     }
     if (auxCommandSlot == AuxCmdSlot::All) {
-        for (int i = 0; i < 3; ++i) set_wire_in<true>(dev, WireInAuxCmdBank[i], value, mask);
+        for (int i = 0; i < 3; ++i) set_wire_in<true>(dev.get(), WireInAuxCmdBank[i], value, mask);
     } else {
-        set_wire_in<true>(dev, WireInAuxCmdBank[static_cast<int>(auxCommandSlot)], value, mask);
+        set_wire_in<true>(dev.get(), WireInAuxCmdBank[static_cast<int>(auxCommandSlot)], value,
+                          mask);
     }
 }
 
@@ -682,13 +572,14 @@ void Rhd2000EvalBoard::selectAuxCommandLength(AuxCmdSlot auxCommandSlot, int loo
     }
 
     if (auxCommandSlot == AuxCmdSlot::All) {
-        set_wire_in<false>(dev, WireInAuxCmdLoop,
+        set_wire_in<false>(dev.get(), WireInAuxCmdLoop,
                            loopIndex | (loopIndex << 10) | (loopIndex << 20));
-        set_wire_in<true>(dev, WireInAuxCmdLength, endIndex | (endIndex << 10) | (endIndex << 20));
+        set_wire_in<true>(dev.get(), WireInAuxCmdLength,
+                          endIndex | (endIndex << 10) | (endIndex << 20));
     } else {
         const auto aux = static_cast<int>(auxCommandSlot);
-        set_wire_in<false>(dev, WireInAuxCmdLoop, loopIndex << aux * 10, 0x3ff << aux * 10);
-        set_wire_in<true>(dev, WireInAuxCmdLength, endIndex << aux * 10, 0x3ff << aux * 10);
+        set_wire_in<false>(dev.get(), WireInAuxCmdLoop, loopIndex << aux * 10, 0x3ff << aux * 10);
+        set_wire_in<true>(dev.get(), WireInAuxCmdLength, endIndex << aux * 10, 0x3ff << aux * 10);
     }
 }
 
@@ -698,15 +589,13 @@ void Rhd2000EvalBoard::resetBoard()
 {
     lock_guard<mutex> lockOk(okMutex);
 
-    dev->SetWireInValue(WireInResetRun, 0x01, 0x01);
-    dev->UpdateWireIns();
-    dev->SetWireInValue(WireInResetRun, 0x00, 0x01);
-    dev->UpdateWireIns();
+    dev->set_register_sync(WireInResetRun, 0x01, 0x01);
+    dev->set_register_sync(WireInResetRun, 0x00, 0x01);
 
     // Set up USB3 block transfer parameters.
     // Divide by 4 to convert from bytes to 32-bit words (used in FPGA FIFO)
-    send_trigger_in(dev, TrigInConfig, 9, WireInMultiUse, USB3_BLOCK_SIZE / 4);
-    send_trigger_in(dev, TrigInConfig, 10, WireInMultiUse, RAM_BURST_SIZE);
+    // send_trigger_in(dev, TrigInConfig, 9, WireInMultiUse, USB3_BLOCK_SIZE / 4);
+    // send_trigger_in(dev, TrigInConfig, 10, WireInMultiUse, RAM_BURST_SIZE);
 }
 
 // Low-level FPGA reset.  Call when closing application to make sure everything has stopped.
@@ -714,7 +603,7 @@ void Rhd2000EvalBoard::resetFpga()
 {
     lock_guard<mutex> lockOk(okMutex);
 
-    dev->ResetFPGA();
+    // dev->ResetFPGA();
     is_open = false;
 }
 
@@ -725,11 +614,10 @@ void Rhd2000EvalBoard::setContinuousRunMode(bool continuousMode)
     lock_guard<mutex> lockOk(okMutex);
 
     if (continuousMode) {
-        dev->SetWireInValue(WireInResetRun, 0x02, 0x02);
+        dev->set_register_sync(WireInResetRun, 0x02, 0x02);
     } else {
-        dev->SetWireInValue(WireInResetRun, 0x00, 0x02);
+        dev->set_register_sync(WireInResetRun, 0x00, 0x02);
     }
-    dev->UpdateWireIns();
 }
 
 // Set maxTimeStep for cases where continuousMode == false.
@@ -737,8 +625,7 @@ void Rhd2000EvalBoard::setMaxTimeStep(unsigned int maxTimeStep)
 {
     lock_guard<mutex> lockOk(okMutex);
 
-    dev->SetWireInValue(WireInMaxTimeStep, maxTimeStep);
-    dev->UpdateWireIns();
+    dev->set_register_sync(WireInMaxTimeStep, maxTimeStep);
 }
 
 // Initiate SPI data acquisition.
@@ -746,7 +633,7 @@ void Rhd2000EvalBoard::run()
 {
     lock_guard<mutex> lockOk(okMutex);
 
-    dev->ActivateTriggerIn(TrigInSpiStart, 0);
+    dev->trigger(TrigInSpiStart, 0);
 }
 
 // Is the FPGA currently running?
@@ -755,8 +642,7 @@ bool Rhd2000EvalBoard::isRunning()
     lock_guard<mutex> lockOk(okMutex);
     int value;
 
-    dev->UpdateWireOuts();
-    value = dev->GetWireOutValue(WireOutSpiRunning);
+    value = dev->get_register_sync(WireOutSpiRunning).value();
 
     if ((value & 0x01) == 0) {
         return false;
@@ -765,16 +651,6 @@ bool Rhd2000EvalBoard::isRunning()
     }
 }
 
-// Returns the number of 16-bit words in the USB FIFO.  The user should never attempt to read
-// more data than the FIFO currently contains, as it is not protected against underflow.
-// (Private method.)
-unsigned int Rhd2000EvalBoard::numWordsInFifo()
-{
-    lock_guard<mutex> lockOk(okMutex);
-    dev->UpdateWireOuts();
-    lastNumWordsInFifo = dev->GetWireOutValue(WireOutNumWords);
-    return lastNumWordsInFifo;
-}
 
 // Set the delay for sampling the MISO line on a particular SPI port (PortA - PortH), in integer
 // clock steps, where each clock step is 1/2800 of a per-channel sampling period. Note: Cable delay
@@ -789,11 +665,12 @@ void Rhd2000EvalBoard::setCableDelay(SPIPort port, int delay)
     }
 
     if (port == SPIPort::All) {
-        if (delay >= 0) set_wire_in<true>(dev, WireInMisoDelay, delay * 0x11111111);
+        if (delay >= 0) set_wire_in<true>(dev.get(), WireInMisoDelay, delay * 0x11111111llu);
         std::fill(cableDelay.begin(), cableDelay.end(), delay);
     } else {
         const auto idx = static_cast<int>(port);
-        if (delay >= 0) set_wire_in<true>(dev, WireInMisoDelay, delay << 4 * idx, 0xf << 4 * idx);
+        if (delay >= 0)
+            set_wire_in<true>(dev.get(), WireInMisoDelay, delay << 4 * idx, 0xf << 4 * idx);
         cableDelay[idx] = delay;
     }
 }
@@ -876,8 +753,7 @@ void Rhd2000EvalBoard::setDspSettle(bool enabled)
 {
     lock_guard<mutex> lockOk(okMutex);
 
-    dev->SetWireInValue(WireInResetRun, (enabled ? 0x04 : 0x00), 0x04);
-    dev->UpdateWireIns();
+    dev->set_register_sync(WireInResetRun, (enabled ? 0x04 : 0x00), 0x04);
 }
 
 // Enable or disable one of the 32 available USB data streams (0-31).
@@ -892,13 +768,13 @@ void Rhd2000EvalBoard::enableDataStream(int stream, bool enabled)
 
     if (enabled) {
         if (dataStreamEnabled[stream] == 0) {
-            set_wire_in<true>(dev, WireInDataStreamEn, 1 << stream, 1 << stream);
+            set_wire_in<true>(dev.get(), WireInDataStreamEn, 1 << stream, 1 << stream);
             dataStreamEnabled[stream] = 1;
             numDataStreams++;
         }
     } else {
         if (dataStreamEnabled[stream] == 1) {
-            set_wire_in<true>(dev, WireInDataStreamEn, 0, 1 << stream);
+            set_wire_in<true>(dev.get(), WireInDataStreamEn, 0, 1 << stream);
             dataStreamEnabled[stream] = 0;
             numDataStreams--;
         }
@@ -910,8 +786,7 @@ void Rhd2000EvalBoard::clearTtlOut()
 {
     lock_guard<mutex> lockOk(okMutex);
 
-    dev->SetWireInValue(WireInTtlOut, 0x0000);
-    dev->UpdateWireIns();
+    dev->set_register_sync(WireInTtlOut, 0x0000);
 }
 
 // Set the 16 bits of the digital TTL output lines on the FPGA high or low according to integer
@@ -925,8 +800,7 @@ void Rhd2000EvalBoard::setTtlOut(int ttlOutArray[])
     for (i = 0; i < 16; ++i) {
         if (ttlOutArray[i] > 0) ttlOut += 1 << i;
     }
-    dev->SetWireInValue(WireInTtlOut, ttlOut);
-    dev->UpdateWireIns();
+    dev->set_register_sync(WireInTtlOut, ttlOut);
 }
 
 // Read the 16 bits of the digital TTL input lines on the FPGA into an integer array.
@@ -935,8 +809,7 @@ void Rhd2000EvalBoard::getTtlIn(int ttlInArray[])
     lock_guard<mutex> lockOk(okMutex);
     int i, ttlIn;
 
-    dev->UpdateWireOuts();
-    ttlIn = dev->GetWireOutValue(WireOutTtlIn);
+    ttlIn = dev->get_register_sync(WireOutTtlIn).value();
 
     // kontexdev!
     for (i = 0; i < MAX_DIO; ++i) {
@@ -954,8 +827,7 @@ void Rhd2000EvalBoard::setDacManual(int value)
         return;
     }
 
-    dev->SetWireInValue(WireInDacManual, value);
-    dev->UpdateWireIns();
+    dev->set_register_sync(WireInDacManual, value);
 }
 
 // Set the eight red LEDs on the Opal Kelly XEM6310 board according to integer array.
@@ -968,8 +840,7 @@ void Rhd2000EvalBoard::setLedDisplay(int ledArray[])
     for (i = 0; i < 8; ++i) {
         if (ledArray[i] > 0) ledOut += 1 << i;
     }
-    dev->SetWireInValue(WireInLedDisplay, ledOut);
-    dev->UpdateWireIns();
+    dev->set_register_sync(WireInLedDisplay, ledOut);
 }
 
 // Set the eight red LEDs on the front panel SPI ports according to integer array.
@@ -982,9 +853,8 @@ void Rhd2000EvalBoard::setSpiLedDisplay(int ledArray[])
     for (i = 0; i < 8; ++i) {
         if (ledArray[i] > 0) ledOut += 1 << i;
     }
-    dev->SetWireInValue(WireInMultiUse, ledOut);
-    dev->UpdateWireIns();
-    dev->ActivateTriggerIn(TrigInConfig, 8);
+    dev->set_register_sync(WireInMultiUse, ledOut);
+    dev->trigger(TrigInConfig, 8);
 }
 
 
@@ -997,7 +867,7 @@ void Rhd2000EvalBoard::enableDac(int dacChannel, bool enabled)
         cerr << "Error in Rhd2000EvalBoard::enableDac: dacChannel out of range." << endl;
         return;
     }
-    set_wire_in<true>(dev, WireInDacSource[dacChannel], (enabled ? 0x0800 : 0x0000), 0x0800);
+    set_wire_in<true>(dev.get(), WireInDacSource[dacChannel], (enabled ? 0x0800 : 0x0000), 0x0800);
 }
 
 // Set the gain level of all eight DAC channels to 2^gain (gain = 0-7).
@@ -1009,8 +879,7 @@ void Rhd2000EvalBoard::setDacGain(int gain)
         return;
     }
 
-    dev->SetWireInValue(WireInResetRun, gain << 13, 0xe000);
-    dev->UpdateWireIns();
+    dev->set_register_sync(WireInResetRun, gain << 13, 0xe000);
 }
 
 
@@ -1026,8 +895,7 @@ void Rhd2000EvalBoard::setAudioNoiseSuppress(int noiseSuppress)
         return;
     }
 
-    dev->SetWireInValue(WireInResetRun, noiseSuppress << 6, 0x1fc0);
-    dev->UpdateWireIns();
+    dev->set_register_sync(WireInResetRun, noiseSuppress << 6, 0x1fc0);
 }
 
 // Assign a particular data stream (0-31) to a DAC channel (0-7).  Setting stream
@@ -1046,7 +914,7 @@ void Rhd2000EvalBoard::selectDacDataStream(int dacChannel, int stream)
         cerr << "Error in Rhd2000EvalBoard::selectDacDataStream: stream out of range." << endl;
         return;
     }
-    set_wire_in<true>(dev, WireInDacSource[dacChannel], stream << 5, 0x07e0);
+    set_wire_in<true>(dev.get(), WireInDacSource[dacChannel], stream << 5, 0x07e0);
 }
 
 // Assign a particular amplifier channel (0-31) to a DAC channel (0-7).
@@ -1064,7 +932,7 @@ void Rhd2000EvalBoard::selectDacDataChannel(int dacChannel, int dataChannel)
              << endl;
         return;
     }
-    set_wire_in<true>(dev, WireInDacSource[dacChannel], dataChannel << 0, 0x001f);
+    set_wire_in<true>(dev.get(), WireInDacSource[dacChannel], dataChannel << 0, 0x001f);
 }
 
 
@@ -1086,7 +954,7 @@ void Rhd2000EvalBoard::config_dac(int channel, bool enable, int source_stream, i
     }
     // RHD [enable:1bit, stream:6bit, channel:5bit]
     // RHS [enable:1bit, stream:4bit, channel:5bit]
-    set_wire_in<true>(dev, WireInDacSource[channel],
+    set_wire_in<true>(dev.get(), WireInDacSource[channel],
                       (enable * (rhs ? 0x0200 : 0x0800)) | (source_stream << 5) | source_channel,
                       rhs ? 0x3fff : 0xffff);
 }
@@ -1098,9 +966,8 @@ void Rhd2000EvalBoard::enableExternalFastSettle(bool enable)
 {
     lock_guard<mutex> lockOk(okMutex);
 
-    dev->SetWireInValue(WireInMultiUse, enable ? 1 : 0);
-    dev->UpdateWireIns();
-    dev->ActivateTriggerIn(TrigInConfig, 6);
+    dev->set_register_sync(WireInMultiUse, enable ? 1 : 0);
+    dev->trigger(TrigInConfig, 6);
 }
 
 // Select which of the TTL inputs 0-15 is used to perform a hardware 'fast settle' (blanking)
@@ -1115,9 +982,8 @@ void Rhd2000EvalBoard::setExternalFastSettleChannel(int channel)
         return;
     }
 
-    dev->SetWireInValue(WireInMultiUse, channel);
-    dev->UpdateWireIns();
-    dev->ActivateTriggerIn(TrigInConfig, 7);
+    dev->set_register_sync(WireInMultiUse, channel);
+    dev->trigger(TrigInConfig, 7);
 }
 
 // Enable external control of RHD2000 auxiliary digital output pin (auxout).
@@ -1128,9 +994,9 @@ void Rhd2000EvalBoard::enableExternalDigOut(SPIPort port, bool enable)
     lock_guard<mutex> lockOk(okMutex);
     if (port == SPIPort::All) {
         for (int i = 0; i < ports.num_of_spi; ++i)
-            send_trigger_in(dev, TrigInDacConfig, 16 + i, WireInMultiUse, int(enable));
+            send_trigger_in(dev.get(), TrigInDacConfig, 16 + i, WireInMultiUse, int(enable));
     } else {
-        send_trigger_in(dev, TrigInDacConfig, 16 + static_cast<int>(port), WireInMultiUse,
+        send_trigger_in(dev.get(), TrigInDacConfig, 16 + static_cast<int>(port), WireInMultiUse,
                         int(enable));
     }
 }
@@ -1147,9 +1013,10 @@ void Rhd2000EvalBoard::setExternalDigOutChannel(SPIPort port, int channel)
     }
     if (port == SPIPort::All) {
         for (int i = 0; i < ports.num_of_spi; ++i)
-            send_trigger_in(dev, TrigInDacConfig, 24 + i, WireInMultiUse, channel);
+            send_trigger_in(dev.get(), TrigInDacConfig, 24 + i, WireInMultiUse, channel);
     } else {
-        send_trigger_in(dev, TrigInDacConfig, 24 + static_cast<int>(port), WireInMultiUse, channel);
+        send_trigger_in(dev.get(), TrigInDacConfig, 24 + static_cast<int>(port), WireInMultiUse,
+                        channel);
     }
 }
 
@@ -1162,9 +1029,8 @@ void Rhd2000EvalBoard::enableDacHighpassFilter(bool enable)
 {
     lock_guard<mutex> lockOk(okMutex);
 
-    dev->SetWireInValue(WireInMultiUse, enable ? 1 : 0);
-    dev->UpdateWireIns();
-    dev->ActivateTriggerIn(TrigInConfig, 4);
+    dev->set_register_sync(WireInMultiUse, enable ? 1 : 0);
+    dev->trigger(TrigInConfig, 4);
 }
 
 // Set cutoff frequency (in Hz) for optional FPGA-implemented digital high-pass filters
@@ -1193,9 +1059,8 @@ void Rhd2000EvalBoard::setDacHighpassFilter(double cutoff)
         filterCoefficient = 65535;
     }
 
-    dev->SetWireInValue(WireInMultiUse, filterCoefficient);
-    dev->UpdateWireIns();
-    dev->ActivateTriggerIn(TrigInConfig, 5);
+    dev->set_register_sync(WireInMultiUse, filterCoefficient);
+    dev->trigger(TrigInConfig, 5);
 }
 
 // Set thresholds for DAC channels; threshold output signals appear on TTL outputs 0-7.
@@ -1219,14 +1084,12 @@ void Rhd2000EvalBoard::setDacThreshold(int dacChannel, int threshold, bool trigP
     }
 
     // Set threshold level.
-    dev->SetWireInValue(WireInMultiUse, threshold);
-    dev->UpdateWireIns();
-    dev->ActivateTriggerIn(TrigInDacConfig, dacChannel);
+    dev->set_register_sync(WireInMultiUse, threshold);
+    dev->trigger(TrigInDacConfig, dacChannel);
 
     // Set threshold polarity.
-    dev->SetWireInValue(WireInMultiUse, (trigPolarity ? 1 : 0));
-    dev->UpdateWireIns();
-    dev->ActivateTriggerIn(TrigInDacConfig, dacChannel + 8);
+    dev->set_register_sync(WireInMultiUse, (trigPolarity ? 1 : 0));
+    dev->trigger(TrigInDacConfig, dacChannel + 8);
 }
 
 // Set the TTL output mode of the board.
@@ -1242,8 +1105,7 @@ void Rhd2000EvalBoard::setTtlMode(int mode)
         return;
     }
 
-    dev->SetWireInValue(WireInResetRun, mode << 3, 0x0008);
-    dev->UpdateWireIns();
+    dev->set_register_sync(WireInResetRun, mode << 3, 0x0008);
 }
 
 // Is variable-frequency clock DCM programming done?
@@ -1251,8 +1113,7 @@ bool Rhd2000EvalBoard::isDcmProgDone() const
 {
     int value;
 
-    dev->UpdateWireOuts();
-    value = dev->GetWireOutValue(WireOutDataClkLocked);
+    value = dev->get_register_sync(WireOutDataClkLocked).value();
 
     return ((value & 0x0002) > 1);
 }
@@ -1262,8 +1123,7 @@ bool Rhd2000EvalBoard::isDataClockLocked() const
 {
     int value;
 
-    dev->UpdateWireOuts();
-    value = dev->GetWireOutValue(WireOutDataClkLocked);
+    value = dev->get_register_sync(WireOutDataClkLocked).value();
 
     return ((value & 0x0001) > 0);
 }
@@ -1278,36 +1138,29 @@ void Rhd2000EvalBoard::flush()
     // read all data from fifo
     // reset pipeout block throttle
 
-    dev->SetWireInValue(WireInResetRun, 1 << 17, 1 << 17);
-    dev->UpdateWireIns();
-
-    dev->SetWireInValue(WireInResetRun, 0 << 17, 1 << 17);
-    dev->UpdateWireIns();
+    dev->set_register_sync(WireInResetRun, 1 << 17, 1 << 17);
+    dev->set_register_sync(WireInResetRun, 0 << 17, 1 << 17);
 }
 
 // Reads a certain number of USB data blocks, if the specified number is available, and writes the
 // raw bytes to a buffer.  Returns total number of bytes read.
 long Rhd2000EvalBoard::read_raw_samples(int samples, unsigned char *buffer)
 {
-    // force user to check for available blocks before reading
-    const auto samples_available = get_num_samples_available(false);
-    if (samples_available < samples) {
-        cerr << "Not enough data blocks available to read, or did not check for available blocks\n";
-        return 0;
-    }
+    long result = dev->read(PipeOutData, samples * get_sample_size<char>(), buffer);
 
-    long result = dev->ReadFromBlockPipeOut(PipeOutData, USB3_BLOCK_SIZE,
-                                            samples * get_sample_size<char>(), buffer);
 
-    if (result == ok_Failed) {
-        cerr << "CRITICAL (readDataBlocksRaw): Failure on BT pipe read.  Check block and buffer "
-                "sizes.\n";
-    } else if (result == ok_Timeout) {
-        cerr << "CRITICAL (readDataBlocksRaw): Timeout on BT pipe read.  Check block and buffer "
-                "sizes.\n";
+    if (result < 0) {
+        cerr << "read data error\n";
+    } else {
+        cout << "read data success" << result << endl;
     }
 
     return result;
+}
+
+int Rhd2000EvalBoard::read_raw_to_buffer(int bytes, unsigned char *buffer)
+{
+    return dev->read(PipeOutData, bytes, buffer);
 }
 
 std::optional<Rhd2000DataBlock> Rhd2000EvalBoard::run_and_read_samples(
@@ -1327,15 +1180,8 @@ std::optional<Rhd2000DataBlock> Rhd2000EvalBoard::run_and_read_samples(
             }
         }
     } else {
-        while (isRunning())
-            ;
+        while (isRunning());
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-
-    auto available = get_num_samples_available(true);
-    if (available != samples) {
-        std::cerr << "Error: expected " << samples << " samples, got " << available << std::endl;
-        return std::nullopt;
     }
 
     return read_samples(samples);
@@ -1346,10 +1192,20 @@ std::optional<Rhd2000DataBlock> Rhd2000EvalBoard::read_samples(int samples)
 {
     lock_guard<mutex> lockOk(okMutex);
     auto result = read_raw_samples(samples, &usbBuffer[0]);
+    const auto ss = get_sample_size<char>();
     if (result < 0) {
         std::cerr << "Error reading data block " << result << std::endl;
         return std::nullopt;
     }
+    // for(int f=0;f<3;++f){
+    //     for(int i=0;i<ss;++i){
+    //         fmt::print("{:02x} ", usbBuffer[f*ss + i]);
+    //         if(i==11) fmt::print("\n");
+    //         if((i-12)%32 == 31)
+    //             fmt::print("\n");
+    //     }
+    //     fmt::print("\n");
+    // }
     return std::make_optional<Rhd2000DataBlock>(numDataStreams, samples, dio32, &usbBuffer[0]);
 }
 
@@ -1423,8 +1279,7 @@ int Rhd2000EvalBoard::getBoardMode()
     lock_guard<mutex> lockOk(okMutex);
     int mode;
 
-    dev->UpdateWireOuts();
-    mode = dev->GetWireOutValue(WireOutBoardMode);
+    mode = dev->get_register_sync(WireOutBoardMode).value();
 
     return mode;
 }
@@ -1471,8 +1326,7 @@ void Rhd2000EvalBoard::setDacRerefSource(int stream, int channel)
         return;
     }
 
-    dev->SetWireInValue(WireInDacReref, (stream << 5) + channel, 0x0000003ff);
-    dev->UpdateWireIns();
+    dev->set_register_sync(WireInDacReref, (stream << 5) + channel, 0x0000003ff);
 }
 
 // Enables DAC rereferencing, where a selected amplifier channel is subtracted from all DACs in real
@@ -1481,8 +1335,7 @@ void Rhd2000EvalBoard::enableDacReref(bool enabled)
 {
     lock_guard<mutex> lockOk(okMutex);
 
-    dev->SetWireInValue(WireInDacReref, (enabled ? 0x00000400 : 0x00000000), 0x00000400);
-    dev->UpdateWireIns();
+    dev->set_register_sync(WireInDacReref, (enabled ? 0x00000400 : 0x00000000), 0x00000400);
 }
 
 template <typename OS>

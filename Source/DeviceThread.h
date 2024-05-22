@@ -308,12 +308,9 @@ private:
 
     StringArray channelNames;
 
-    Rhd2000DataBlock *current_block = nullptr;
-    std::vector<bool> isddrstream;
-    int current_aquisition_channels = 0;
-    int current_aquisition_streams = 0;
-    std::vector<unsigned char> data_buffer;
-    std::vector<float> output_buffer;
+    std::thread data_thread;
+    std::atomic_bool running;
+
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DeviceThread);
 };

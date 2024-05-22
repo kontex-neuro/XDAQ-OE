@@ -1010,32 +1010,77 @@ bool DeviceThread::startAcquisition()
     evalBoard->flush();
     evalBoard->setContinuousRunMode(true);
     evalBoard->run();
+    running = true;
+    data_thread = std::thread([this]() {
+        const int numStreams = evalBoard->getNumEnabledDataStreams();
+        std::vector<bool> isddrstream;
 
-    // LOGD("Expecting blocksize of ", blockSize, " for ", evalBoard->getNumEnabledDataStreams(), "
-    // streams");
+        const int chunk_size = 1;
+        Rhd2000DataBlock current_block(numStreams, chunk_size, evalBoard->get_dio32());
+        int nonddr = 0;
+        for (int i = 0; i < evalBoard->ports.max_streams; ++i) {
+            if (!evalBoard->isStreamEnabled(i)) continue;
+            bool ddr = evalBoard->ports.is_ddr(i);
+            isddrstream.push_back(ddr);
+            nonddr += !ddr;
+        }
+        isddrstream.push_back(false);
+        const int current_aquisition_streams = evalBoard->getNumEnabledDataStreams();
+        const int current_aquisition_channels =
+            (32 * numStreams + nonddr * 3 * settings.acquireAux +
+             +settings.acquireAdc * evalBoard->ports.num_of_adc);
+        const int buffer_samples = 256;
+        std::vector<unsigned char> data_buffer(evalBoard->get_sample_size<char>() * buffer_samples);
+        std::vector<float> output_buffer(current_aquisition_channels * chunk_size);
 
-    assert(current_block == nullptr);
-    const int numStreams = evalBoard->getNumEnabledDataStreams();
+        while (running) {
+            for(auto begin = data_buffer.begin(); begin != data_buffer.end();){
+                auto r = evalBoard->read_raw_to_buffer(data_buffer.end() - begin, &*begin);
+                begin +=r;
+                if(r == 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                if(!running) return;
+            }
+            const auto chunk_buffer_size = evalBoard->get_sample_size<char>() * chunk_size;
 
-    // const int chunk_size = 32;
-    const int chunk_size = 1;
-    current_block = new Rhd2000DataBlock(numStreams, chunk_size, evalBoard->get_dio32());
+            for (int chunk = 0; chunk < data_buffer.size() / chunk_buffer_size; ++chunk) {
+                current_block.from_buffer(&data_buffer[chunk_buffer_size * chunk]);
 
-    assert(isddrstream.size() == 0);
-    int nonddr = 0;
-    for (int i = 0; i < evalBoard->ports.max_streams; ++i) {
-        if (!evalBoard->isStreamEnabled(i)) continue;
-        bool ddr = evalBoard->ports.is_ddr(i);
-        isddrstream.push_back(ddr);
-        nonddr += !ddr;
-    }
-    isddrstream.push_back(false);
-    current_aquisition_streams = evalBoard->getNumEnabledDataStreams();
-    current_aquisition_channels = (32 * numStreams + nonddr * 3 * settings.acquireAux +
-                                   +settings.acquireAdc * evalBoard->ports.num_of_adc);
-    data_buffer.resize(evalBoard->get_sample_size<char>() * SAMPLES_PER_DATA_BLOCK * 4);
-    output_buffer.resize(current_aquisition_channels * chunk_size);
-    // output_buffer.resize(current_aquisition_channels * 300);
+                // tranpose data from Time x Channel x Stream to Time x Stream x Channel
+                auto target = output_buffer.begin();
+                for (int s = 0; s < current_aquisition_streams; ++s) {
+                    target =
+                        std::copy(current_block.amp.begin() + s * 32 * chunk_size,
+                                  current_block.amp.begin() + (s + 1) * 32 * chunk_size, target);
+                    if (!settings.acquireAux | (!isddrstream[s] && isddrstream[s + 1])) continue;
+
+                    for (int c = 0; c < 3; ++c) {
+                        auto &current_aux_buffer = auxBuffer[s * 3 + c];
+                        for (int t = 0; t < chunk_size; ++t) {
+                            // aux is offset by 1
+                            const int aux = (current_block.timeStamp[t] + 3) % 4;
+                            // update aux buffer with new value that sampled every 4th sample
+                            if (aux == c)
+                                current_aux_buffer =
+                                    IntanChip::aux2V(current_block.aux[1][s * chunk_size+ t]);
+                            // oversampleing by 4 times
+                            *target++ = current_aux_buffer;
+                        }
+                    }
+                }
+
+                if (settings.acquireAdc) {
+                    std::copy(current_block.adc.begin(), current_block.adc.end(), target);
+                }
+
+                auto ts = std::vector<double>(chunk_size, 0);
+                auto ttl = std::vector<uint64_t>(chunk_size);
+                std::transform(current_block.ttlIn.begin(), current_block.ttlIn.end(), ttl.begin(),
+                               [](auto t) { return t; });
+                sourceBuffers[0]->addToBuffer(&output_buffer[0], &current_block.timeStamp[0],
+                                              &ts[0], &ttl[0], chunk_size, chunk_size);
+            }
+        }
+    });
 
     startThread();
 
@@ -1047,6 +1092,9 @@ bool DeviceThread::startAcquisition()
 bool DeviceThread::stopAcquisition()
 {
     // LOGD("RHD2000 data thread stopping acquisition.");
+    running = false;
+    if (data_thread.joinable())
+        data_thread.join();
 
     if (isThreadRunning()) {
         signalThreadShouldExit();
@@ -1076,101 +1124,12 @@ bool DeviceThread::stopAcquisition()
     // remove commands
     while (!digitalOutputCommands.empty()) digitalOutputCommands.pop();
 
-    delete current_block;
-    current_block = nullptr;
-    isddrstream.clear();
-    current_aquisition_channels = 0;
-    current_aquisition_streams = 0;
-    output_buffer.clear();
 
     return true;
 }
 
 bool DeviceThread::updateBuffer()
 {
-    // using Clock = std::chrono::high_resolution_clock;
-    // static auto sumtime = 0.0;
-    // static auto measurementCount = 0;
-    const int samples_available = evalBoard->get_num_samples_available(true);
-    if (samples_available > SAMPLES_PER_DATA_BLOCK * 4) {
-        evalBoard->read_to_buffer(SAMPLES_PER_DATA_BLOCK * 4, &data_buffer[0]);
-        const auto chunk_buffer_size =
-            evalBoard->get_sample_size<char>() * current_block->num_samples;
-        for (int chunk = 0; chunk < SAMPLES_PER_DATA_BLOCK * 4 / current_block->num_samples;
-             ++chunk) {
-            // auto start_time = Clock::now();
-            // const auto all_start_time = start_time;
-
-            current_block->from_buffer(&data_buffer[chunk_buffer_size * chunk]);
-            // auto rbt =
-            //     std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - start_time)
-            //         .count();
-            // sumtime += rbt;
-            // ++measurementCount;
-            const int num_samples = current_block->num_samples;
-            // if (chunk == (SAMPLES_PER_DATA_BLOCK * 4 / current_block->num_samples - 1))
-            //    fmt::print("read {} samples in {} ns avg {:.0f} us/samp, {} to go", num_samples,
-            //               rbt, sumtime / measurementCount / num_samples, samples_available);
-            // start_time = Clock::now();
-
-
-            // tranpose data from Time x Channel x Stream to Time x Stream x Channel
-            auto target = output_buffer.begin();
-            const auto num_streams = isddrstream.size() - 1;
-            for (int s = 0; s < current_aquisition_streams; ++s) {
-                target = std::copy(current_block->amp.begin() + s * 32 * num_samples,
-                                   current_block->amp.begin() + (s + 1) * 32 * num_samples, target);
-                if (!settings.acquireAux | (!isddrstream[s] && isddrstream[s + 1])) continue;
-
-                for (int c = 0; c < 3; ++c) {
-                    auto &current_aux_buffer = auxBuffer[s * 3 + c];
-                    for (int t = 0; t < num_samples; ++t) {
-                        // aux is offset by 1
-                        const int aux = (current_block->timeStamp[t] + 3) % 4;
-                        // update aux buffer with new value that sampled every 4th sample
-                        if (aux == c)
-                            current_aux_buffer =
-                                IntanChip::aux2V(current_block->aux[1][s * num_samples + t]);
-                        // oversampleing by 4 times
-                        *target++ = current_aux_buffer;
-                    }
-                }
-            }
-
-            if (settings.acquireAdc) {
-                std::copy(current_block->adc.begin(), current_block->adc.end(), target);
-            }
-
-            auto ts = std::vector<double>(num_samples, 0);
-            // Not ideal to cast into another vector, but it's more convenient to switch between
-            // 16 / 32 channels
-            auto ttl = std::vector<unsigned long long>(num_samples);
-            std::transform(current_block->ttlIn.begin(), current_block->ttlIn.end(), ttl.begin(),
-                           [](auto t) { return t; });
-
-            // if (chunk == (SAMPLES_PER_DATA_BLOCK * 4 / current_block->num_samples - 1))
-            //     fmt::print("Trans {} ns ", std::chrono::duration_cast<std::chrono::nanoseconds>(
-            //                                    Clock::now() - start_time)
-            //                                    .count());
-            // start_time = Clock::now();
-
-            sourceBuffers[0]->addToBuffer(&output_buffer[0], &current_block->timeStamp[0], &ts[0],
-                                          &ttl[0], num_samples, num_samples);
-
-            // if (chunk == (SAMPLES_PER_DATA_BLOCK * 4 / current_block->num_samples - 1))
-            //     fmt::print(
-            //         "Added to buffer {} ns / sample , Total={}\n",
-            //         std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() -
-            //         start_time)
-            //                 .count() /
-            //             num_samples,
-            //         std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() -
-            //                                                              all_start_time)
-            //                 .count() /
-            //             num_samples);
-        }
-    }
-
     if (updateSettingsDuringAcquisition) {
         LOGD("DAC");
         for (int k = 0; k < 8; k++) {

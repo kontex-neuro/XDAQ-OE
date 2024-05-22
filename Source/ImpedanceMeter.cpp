@@ -368,11 +368,6 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
             board->evalBoard->run();
             while (board->evalBoard->isRunning())
                 ;
-            if (board->evalBoard->get_num_samples_available(true) !=
-                SAMPLES_PER_DATA_BLOCK * numBlocks) {
-                std::cerr << "Error: Did not receive enough data from board.\n";
-                return std::nullopt;
-            }
             auto db = board->evalBoard->read_samples(SAMPLES_PER_DATA_BLOCK * numBlocks);
 
             for (int stream = 0; stream < numdataStreams; ++stream) {

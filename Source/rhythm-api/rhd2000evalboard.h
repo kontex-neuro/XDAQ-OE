@@ -40,6 +40,8 @@
 #include "mock_okCFrontPanel.h"
 #endif
 
+#include <xdaq/device_plugin.h>
+
 #include <chrono>
 #include <cstdint>
 #include <mutex>
@@ -50,6 +52,7 @@
 #include "okFrontPanelDLL.h"
 #include "ports.h"
 #include "rhd2000datablock.h"
+
 
 class Rhd2000EvalBoard
 {
@@ -70,7 +73,7 @@ public:
     bool uploadFpgaBitfile(std::string filename);
     void initialize();
 
-    int FPGA_board;
+    // int FPGA_board;
     bool usb3;
 
     enum class SampleRate {
@@ -191,22 +194,12 @@ public:
         return sample_size<Unit>(numDataStreams, CHANNELS_PER_STREAM, dio32);
     }
 
-    template <typename Unit>
-    std::size_t get_fifo_data_size(bool update)
-    {
-        return (update ? numWordsInFifo() : lastNumWordsInFifo) * 2 / sizeof(Unit);
-    }
-
-    int get_num_samples_available(bool update)
-    {
-        return get_fifo_data_size<char>(update) / get_sample_size<char>();
-    }
-
     std::optional<Rhd2000DataBlock> run_and_read_samples(
         int samples, std::optional<std::chrono::milliseconds> timeout = std::nullopt);
     std::optional<Rhd2000DataBlock> read_samples(int samples);
 
     int read_to_buffer(int samples, unsigned char *buffer);
+    int read_raw_to_buffer(int bytes, unsigned char *buffer);
 
     bool readDataBlocks(int numBlocks, std::queue<Rhd2000DataBlock> &dataQueue);
 
@@ -243,7 +236,8 @@ private:
 #ifdef UseMockOkFrontPanel
     MockOkCFrontPanel *dev;
 #else
-    okCFrontPanel *dev;
+    // okCFrontPanel *dev;
+    xdaq::DevicePlugin::PluginOwnedDevice dev;
 #endif
     const int samples_per_block = SAMPLES_PER_DATA_BLOCK;
     long read_raw_samples(int samples, unsigned char *buffer);
@@ -252,7 +246,7 @@ private:
 
     bool expander = false;
 
-    bool dio32 = false;
+    bool dio32 = true;
     SampleRate sampleRate = SampleRate::s30000Hz;
     int numDataStreams = 0;  // total number of data streams currently enabled
     int dataStreamEnabled[MAX_NUM_DATA_STREAMS] = {0};  // 0 (disabled) or 1 (enabled)
@@ -266,9 +260,7 @@ private:
     std::vector<unsigned char> usbBuffer;
     std::string opalKellyModelName(int model) const;
 
+
     bool isDcmProgDone() const;
     bool isDataClockLocked() const;
-
-    unsigned int lastNumWordsInFifo = 0;
-    unsigned int numWordsInFifo();
 };
