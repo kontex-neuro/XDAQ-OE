@@ -23,6 +23,7 @@
 
 #include "ImpedanceMeter.h"
 
+#include "rhythm-api/rhd2000datablock.h"
 #include "rhythm-api/rhd2000evalboard.h"
 
 using namespace RhythmNode;
@@ -320,6 +321,8 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
     CHECK_EXIT;
     board->evalBoard->setContinuousRunMode(false);
     board->evalBoard->setMaxTimeStep(SAMPLES_PER_DATA_BLOCK * numBlocks);
+    std::vector<unsigned char> buffer(SAMPLES_PER_DATA_BLOCK * numBlocks *
+                                      board->evalBoard->get_sample_size<char>());
 
     // Create matrices of doubles of size (numStreams x 32 x 3) to store complex amplitudes
     // of all amplifier channels (32 on each data stream) at three different Cseries values.
@@ -366,9 +369,26 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
             board->evalBoard->uploadCommandList(commands, Rhd2000EvalBoard::AuxCmdSlot::AuxCmd3, 3);
 
             board->evalBoard->run();
-            while (board->evalBoard->isRunning())
-                ;
-            auto db = board->evalBoard->read_samples(SAMPLES_PER_DATA_BLOCK * numBlocks);
+            auto read_begin = buffer.begin();
+            while (board->evalBoard->isRunning()) {
+                auto to_read = buffer.end() - read_begin;
+                if (to_read == 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    continue;
+                }
+                auto r = board->evalBoard->read_raw_to_buffer(to_read, &*read_begin);
+                if (r < 0) {
+                    std::cerr << "Error reading data from board" << std::endl;
+                    return std::nullopt;
+                }
+                if (r == 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    continue;
+                }
+                read_begin += r;
+            }
+            Rhd2000DataBlock db(numdataStreams, SAMPLES_PER_DATA_BLOCK * numBlocks,
+                                board->evalBoard->get_dio32(), buffer.data());
 
             for (int stream = 0; stream < numdataStreams; ++stream) {
                 setProgress(float(capRange) / 3.0f +
@@ -376,7 +396,7 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
                             (float(stream) / float(numdataStreams) / 32.0f / 3.0f));
 
                 const auto r = measureComplexAmplitude(
-                    {&db->amp[(stream * 32 + channel) * SAMPLES_PER_DATA_BLOCK * numBlocks],
+                    {&db.amp[(stream * 32 + channel) * SAMPLES_PER_DATA_BLOCK * numBlocks],
                      static_cast<std::size_t>(SAMPLES_PER_DATA_BLOCK * numBlocks)},
                     numBlocks, board->settings.boardSampleRate, actualImpedanceFreq, numPeriods);
                 measuredMagnitude[stream][channel % 32][capRange] = std::abs(r);
