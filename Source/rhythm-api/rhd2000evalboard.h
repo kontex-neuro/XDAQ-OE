@@ -36,10 +36,6 @@
 
 #define MAX_DIO 32
 
-#ifdef UseMockOkFrontPanel
-#include "mock_okCFrontPanel.h"
-#endif
-
 #include <xdaq/device_plugin.h>
 
 #include <chrono>
@@ -49,7 +45,6 @@
 #include <queue>
 #include <string>
 
-#include "okFrontPanelDLL.h"
 #include "ports.h"
 #include "rhd2000datablock.h"
 
@@ -232,13 +227,8 @@ public:
         return estimateCableLengthMeters(cableDelay[static_cast<int>(port)]);
     }
 
-private:
-#ifdef UseMockOkFrontPanel
-    MockOkCFrontPanel *dev;
-#else
-    // okCFrontPanel *dev;
     xdaq::DevicePlugin::PluginOwnedDevice dev;
-#endif
+private:
     const int samples_per_block = SAMPLES_PER_DATA_BLOCK;
     long read_raw_samples(int samples, unsigned char *buffer);
 

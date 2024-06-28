@@ -23,6 +23,7 @@
 
 #pragma once
 #include <DataThreadHeaders.h>
+#include <xdaq/device_plugin.h>
 
 #include <array>
 #include <atomic>
@@ -32,6 +33,7 @@
 #include "Headstage.h"
 #include "rhythm-api/rhd2000evalboard.h"
 #include "rhythm-api/rhd2000registers.h"
+
 
 #define CHIP_ID_RHD2132 1
 #define CHIP_ID_RHD2216 2
@@ -195,6 +197,9 @@ public:
     bool set_dio32(bool enable) { return evalBoard->set_dio32(enable); }
 
 private:
+    std::optional<std::unique_ptr<xdaq::DevicePlugin::PluginOwnedDevice::element_type::DataStream>>
+        stream;
+
     std::queue<DigitalOutputCommand> digitalOutputCommands;
 
     OwnedArray<DigitalOutputTimer> digitalOutputTimers;
@@ -273,9 +278,6 @@ private:
 
     } settings;
 
-    /** Path to Opal Kelly library file*/
-    String libraryFilePath;
-
     /** Open the connection to the acquisition board*/
     bool openBoard(String pathToLibrary);
 
@@ -307,10 +309,6 @@ private:
     std::optional<Impedances> impedances = std::nullopt;
 
     StringArray channelNames;
-
-    std::thread data_thread;
-    std::atomic_bool running;
-
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DeviceThread);
 };

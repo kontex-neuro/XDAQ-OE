@@ -26,8 +26,6 @@
 #include <array>
 #include <chrono>
 #include <cmath>
-#include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <mutex>
 #include <nlohmann/json.hpp>
@@ -37,9 +35,7 @@
 
 
 
-// #include "mock_okCFrontPanel.h"
 #include "intan_chip.h"
-#include "okFrontPanelDLL.h"
 #include "rhd2000datablock.h"
 
 using namespace std;
@@ -197,7 +193,7 @@ bool Rhd2000EvalBoard::UploadDACData(const vector<uint16_t> &commandList, int da
 bool Rhd2000EvalBoard::set_dio32(bool dio32)
 {
     lock_guard<mutex> lockOk(okMutex);
-    // set_wire_in<true>(dev.get(), Enable32bitDIO, dio32 * 0x04, 0x04);
+    set_wire_in<true>(dev.get(), Enable32bitDIO, dio32 * 0x04, 0x04);
     // this->dio32 = dio32;
     return dio32;
 }
@@ -249,11 +245,19 @@ Rhd2000EvalBoard::~Rhd2000EvalBoard()
 int Rhd2000EvalBoard::open(const char *libname)
 {
     lock_guard<mutex> lockOk(okMutex);
-    auto plugin = xdaq::get_plugin("C:/usr/local/bin/xdma_device_plugin.dll");
+    constexpr bool use_ok = true;
+    auto plugin = xdaq::get_plugin(use_ok ? "C:/usr/local/bin/ok_device_plugin.dll"
+                                          : "C:/usr/local/bin/xdma_device_plugin.dll");
     auto devices = json::parse(plugin->list_devices());
     auto device = devices[0];
     device["mode"] = "rhd";
-    dev = plugin->create_device(device.dump());
+    if (use_ok) device["bitfile_dir"] = "/libxdaq/bitfiles";
+    try {
+        dev = plugin->create_device(device.dump());
+    } catch (const std::exception &e) {
+        cerr << "Error in Rhd2000EvalBoard::open: " << e.what() << endl;
+        return -1;
+    }
     // okCFrontPanel::ErrorCode result = dev->OpenBySerial(serialNumber);
     // // Attempt to open device.
     // if (result != okCFrontPanel::NoError) {
@@ -585,18 +589,7 @@ void Rhd2000EvalBoard::selectAuxCommandLength(AuxCmdSlot auxCommandSlot, int loo
 
 // Reset FPGA.  This clears all auxiliary command RAM banks, clears the USB FIFO, and resets the
 // per-channel sampling rate to 30.0 kS/s/ch.
-void Rhd2000EvalBoard::resetBoard()
-{
-    lock_guard<mutex> lockOk(okMutex);
-
-    dev->set_register_sync(WireInResetRun, 0x01, 0x01);
-    dev->set_register_sync(WireInResetRun, 0x00, 0x01);
-
-    // Set up USB3 block transfer parameters.
-    // Divide by 4 to convert from bytes to 32-bit words (used in FPGA FIFO)
-    // send_trigger_in(dev, TrigInConfig, 9, WireInMultiUse, USB3_BLOCK_SIZE / 4);
-    // send_trigger_in(dev, TrigInConfig, 10, WireInMultiUse, RAM_BURST_SIZE);
-}
+void Rhd2000EvalBoard::resetBoard() {}
 
 // Low-level FPGA reset.  Call when closing application to make sure everything has stopped.
 void Rhd2000EvalBoard::resetFpga()
@@ -1242,33 +1235,6 @@ bool Rhd2000EvalBoard::readDataBlocks(int numBlocks, std::queue<Rhd2000DataBlock
 string Rhd2000EvalBoard::opalKellyModelName(int model) const
 {
     switch (model) {
-    case OK_PRODUCT_XEM3001V1: return ("XEM3001V1");
-    case OK_PRODUCT_XEM3001V2: return ("XEM3001V2");
-    case OK_PRODUCT_XEM3010: return ("XEM3010");
-    case OK_PRODUCT_XEM3005: return ("XEM3005");
-    case OK_PRODUCT_XEM3001CL: return ("XEM3001CL");
-    case OK_PRODUCT_XEM3020: return ("XEM3020");
-    case OK_PRODUCT_XEM3050: return ("XEM3050");
-    case OK_PRODUCT_XEM9002: return ("XEM9002");
-    case OK_PRODUCT_XEM3001RB: return ("XEM3001RB");
-    case OK_PRODUCT_XEM5010: return ("XEM5010");
-    case OK_PRODUCT_XEM6110LX45: return ("XEM6110LX45");
-    case OK_PRODUCT_XEM6001: return ("XEM6001");
-    case OK_PRODUCT_XEM6010LX45: return ("XEM6010LX45");
-    case OK_PRODUCT_XEM6010LX150: return ("XEM6010LX150");
-    case OK_PRODUCT_XEM6110LX150: return ("XEM6110LX150");
-    case OK_PRODUCT_XEM6006LX9: return ("XEM6006LX9");
-    case OK_PRODUCT_XEM6006LX16: return ("XEM6006LX16");
-    case OK_PRODUCT_XEM6006LX25: return ("XEM6006LX25");
-    case OK_PRODUCT_XEM5010LX110: return ("XEM5010LX110");
-    case OK_PRODUCT_ZEM4310: return ("ZEM4310");
-    case OK_PRODUCT_XEM6310LX45: return ("XEM6310LX45");
-    case OK_PRODUCT_XEM6310LX150: return ("XEM6310LX150");
-    case OK_PRODUCT_XEM6110V2LX45: return ("XEM6110V2LX45");
-    case OK_PRODUCT_XEM6110V2LX150: return ("XEM6110V2LX150");
-    case OK_PRODUCT_XEM6002LX9: return ("XEM6002LX9");
-    case OK_PRODUCT_XEM6320LX130T: return ("XEM6320LX130T");
-    case OK_PRODUCT_XEM7310A75: return ("XEM7310A75");
     default: return ("UNKNOWN");
     }
 }
