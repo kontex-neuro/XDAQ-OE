@@ -197,8 +197,16 @@ public:
     bool set_dio32(bool enable) { return evalBoard->set_dio32(enable); }
 
 private:
-    std::optional<std::unique_ptr<xdaq::DevicePlugin::PluginOwnedDevice::element_type::DataStream>>
-        stream;
+    struct DataQueue;
+    // clang-format off
+    std::optional<
+        std::tuple<
+            std::unique_ptr<xdaq::DevicePlugin::PluginOwnedDevice::element_type::DataStream>,
+            std::unique_ptr<DataQueue>,
+            std::thread
+        >
+    > stream;
+    // clang-format on
 
     std::queue<DigitalOutputCommand> digitalOutputCommands;
 

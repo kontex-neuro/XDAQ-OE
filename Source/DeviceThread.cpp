@@ -964,6 +964,34 @@ void DeviceThread::updateRegisters()
 //
 // }
 
+struct DeviceThread::DataQueue {
+    // only one producer and one consumer, undefined behavior otherwise
+    constexpr static int N = 128;
+    using value_type = std::optional<
+        std::pair<std::unique_ptr<unsigned char[], void (*)(unsigned char[])>, std::size_t>>;
+    std::vector<value_type> data_buffers = std::vector<value_type>(N);
+    std::atomic_int next_empty_buffer{0};  // only producer modifies this
+    std::atomic_int next_data{0};          // only consumer modifies this
+
+    bool maybe_full() { return (next_empty_buffer + 1) % N == next_data; }
+
+    bool maybe_empty() { return next_empty_buffer == next_data; }
+
+    int approximate_size() { return (next_empty_buffer - next_data + N) % N; }
+
+    value_type &get_next_empty() { return data_buffers[next_empty_buffer]; }
+
+    void push_next_empty() { next_empty_buffer = (next_empty_buffer + 1) % N; }
+
+    value_type &get_next_data() { return data_buffers[next_data]; }
+
+    void pop_next_data()
+    {
+        data_buffers[next_data] = std::nullopt;
+        next_data = (next_data + 1) % N;
+    }
+};
+
 bool DeviceThread::startAcquisition()
 {
     if (!deviceFound || (getNumChannels() == 0)) return false;
@@ -982,89 +1010,152 @@ bool DeviceThread::startAcquisition()
     evalBoard->run();
     evalBoard->set_dio32(true);
 
-    int buffer_samples;
-    std::size_t buffered = 0;
-    std::vector<bool> isddrstream;
-    int nonddr = 0;
-    for (int i = 0; i < evalBoard->ports.max_streams; ++i) {
-        if (!evalBoard->isStreamEnabled(i)) continue;
-        bool ddr = evalBoard->ports.is_ddr(i);
-        isddrstream.push_back(ddr);
-        nonddr += !ddr;
-    }
-    isddrstream.push_back(false);
-
-    const int current_aquisition_channels =
-        (32 * evalBoard->getNumEnabledDataStreams() + nonddr * 3 * settings.acquireAux +
-         +settings.acquireAdc * evalBoard->ports.num_of_adc);
-
-    stream =
-        evalBoard->dev
-            ->start_read_stream(
-                0xa0,
-                [this, chunk_size = 1, buffered = 0,
-                 streams = evalBoard->getNumEnabledDataStreams(),
-                 sample_size = evalBoard->get_sample_size<char>(),
-                 buffer = std::vector<unsigned char>(evalBoard->get_sample_size<char>()),
-                 acquireAdc = settings.acquireAdc, acquireAux = settings.acquireAux,
-                 output_buffer = std::vector<float>(current_aquisition_channels * 1),
-                 isddrstream = isddrstream, aux_buffer = std::array<float, 32 * 3>(),
-                 sourceBuffers = &sourceBuffers](auto raw_data, std::size_t length) mutable {
-                    std::span<unsigned char> data(raw_data.get(), length);
-                    const int number_of_samples = (data.size() + buffered) / sample_size;
-                    using namespace utils::endian;
-                    auto convert_one_sample = [&](std::ranges::viewable_range auto &&raw) {
-                        if (little2host64(raw.data()) != RHD2000_HEADER_MAGIC_NUMBER) {
-                            fmt::print("Failed to parse data\n");
-                            throw std::runtime_error("Failed to parse data");
+    auto data_queue = new DataQueue();
+    auto new_stream = evalBoard->dev->start_read_stream(
+        0xa0, [data_queue, this](auto raw_data, std::size_t length) {
+            // TODO: need to handle the case where the queue is full
+            if (data_queue->maybe_full()) {
+                LOGE("System is too slow to keep up with data acquisition, dropping data");
+                return;
+            }
+            data_queue->get_next_empty() = {{std::move(raw_data), length}};
+            data_queue->push_next_empty();
+            if (updateSettingsDuringAcquisition) {
+                LOGD("DAC");
+                for (int k = 0; k < 8; k++) {
+                    if (dacChannelsToUpdate[k]) {
+                        dacChannelsToUpdate[k] = false;
+                        if (dacChannels[k] >= 0) {
+                            evalBoard->config_dac(k, true, dacStream[k], dacChannels[k]);
+                            evalBoard->setDacThreshold(
+                                k, (int) abs((dacThresholds[k] / 0.195) + 32768),
+                                dacThresholds[k] >= 0);
+                            // evalBoard->setDacThresholdVoltage(k, (int) dacThresholds[k]);
+                        } else {
+                            evalBoard->enableDac(k, false);
                         }
-                        std::int64_t ts = little2host32(raw.data() + 8);
-                        auto target = output_buffer.begin();
-                        const auto amp = raw.begin() + 12;
-                        for (int s = 0; s < streams; ++s) {
-                            for (int c = 3; c < 35; ++c) {
-                                *(target++) =
-                                    IntanChip::amp2uV(little2host16(&*amp + (s + c * streams) * 2));
-                            }
-                            if (!acquireAux | (!isddrstream[s] && isddrstream[s + 1])) continue;
-                            for (int c = 0; c < 3; ++c) {
-                                if (((ts + 3) % 4) == c)
-                                    aux_buffer[s * 3 + c] = IntanChip::aux2V(
-                                        little2host16(&*amp + (s + c * streams) * 2));
-                                *(target++) = aux_buffer[s * 3 + c];
-                            }
-                        }
-                        const auto io = raw.end() - 8 * 2 - 4 - 4;
-                        if (acquireAdc) {
-                            for (int c = 0; c < 8; ++c) {
-                                *(target++) = IntanChip::adc2V(little2host16(&*io + 2 * c));
-                            }
-                        }
-
-                        double _ts;
-                        uint64_t ttl = little2host32(&*io + 16);
-                        (*sourceBuffers)[0]->addToBuffer(&output_buffer[0], &ts, &_ts, &ttl,
-                                                         chunk_size, chunk_size);
-                    };
-
-                    if (buffered > 0) {
-                        const int remaining = sample_size - buffered;
-                        std::copy(data.begin(), data.begin() + remaining,
-                                  buffer.begin() + buffered);
-                        buffered = 0;
-                        data = data.subspan(remaining);
-                        convert_one_sample(buffer);
                     }
-                    std::ranges::for_each(data.subspan(0, data.size() / sample_size * sample_size) |
-                                              std::ranges::views::chunk(sample_size),
-                                          convert_one_sample);
-                    auto leftover = data.size() % sample_size;
-                    std::copy(data.end() - leftover, data.end(), buffer.begin());
-                    buffered = leftover;
-                })
-            .value(),
+                }
+
+                evalBoard->setTtlMode(settings.ttlMode ? 1 : 0);
+                evalBoard->enableExternalFastSettle(settings.fastTTLSettleEnabled);
+                evalBoard->setExternalFastSettleChannel(settings.fastSettleTTLChannel);
+                evalBoard->setDacHighpassFilter(settings.desiredDAChpf);
+                evalBoard->enableDacHighpassFilter(settings.desiredDAChpfState);
+
+                updateSettingsDuringAcquisition = false;
+            }
+
+            if (!digitalOutputCommands.empty()) {
+                while (!digitalOutputCommands.empty()) {
+                    DigitalOutputCommand command = digitalOutputCommands.front();
+                    TTL_OUTPUT_STATE[command.ttlLine] = command.state;
+                    digitalOutputCommands.pop();
+                }
+
+                evalBoard->setTtlOut(TTL_OUTPUT_STATE);
+
+                LOGB("TTL OUTPUT STATE: ", TTL_OUTPUT_STATE[0], TTL_OUTPUT_STATE[1],
+                     TTL_OUTPUT_STATE[2], TTL_OUTPUT_STATE[3], TTL_OUTPUT_STATE[4],
+                     TTL_OUTPUT_STATE[5], TTL_OUTPUT_STATE[6], TTL_OUTPUT_STATE[7]);
+            }
+        });
+
+    if (!new_stream) {
+        LOGD("Failed to start stream");
+        return false;
+    }
 
     startThread();
+
+    stream = {std::make_tuple<
+        std::unique_ptr<xdaq::DevicePlugin::PluginOwnedDevice::element_type::DataStream>,
+        std::unique_ptr<DataQueue>, std::thread>(
+        {std::move(new_stream.value())}, std::unique_ptr<DataQueue>(data_queue),
+        std::thread([data_queue, this]() {
+            const int chunk_size = 1;
+            int buffer_samples;
+            const auto streams = evalBoard->getNumEnabledDataStreams();
+            const auto sample_size = evalBoard->get_sample_size<char>();
+            auto buffer = std::vector<unsigned char>(evalBoard->get_sample_size<char>());
+            std::size_t buffered = 0;
+            std::vector<bool> isddrstream;
+            auto aux_buffer = std::array<float, 32 * 3>();
+            int nonddr = 0;
+            for (int i = 0; i < evalBoard->ports.max_streams; ++i) {
+                if (!evalBoard->isStreamEnabled(i)) continue;
+                bool ddr = evalBoard->ports.is_ddr(i);
+                isddrstream.push_back(ddr);
+                nonddr += !ddr;
+            }
+            isddrstream.push_back(false);
+
+            const int current_aquisition_channels =
+                (32 * evalBoard->getNumEnabledDataStreams() + nonddr * 3 * settings.acquireAux +
+                 +settings.acquireAdc * evalBoard->ports.num_of_adc);
+
+            auto output_buffer = std::vector<float>(current_aquisition_channels * 1);
+            while (isThreadRunning()) {
+                if (data_queue->maybe_empty()) {
+                    std::this_thread::sleep_for(std::chrono::microseconds(500));
+                    continue;
+                }
+                using namespace utils::endian;
+                auto convert_one_sample = [&](std::ranges::viewable_range auto &&raw) {
+                    if (little2host64(raw.data()) != RHD2000_HEADER_MAGIC_NUMBER) {
+                        fmt::print("Failed to parse data\n");
+                        throw std::runtime_error("Failed to parse data");
+                    }
+                    std::int64_t ts = little2host32(raw.data() + 8);
+                    auto target = output_buffer.begin();
+                    const auto amp = raw.begin() + 12;
+                    for (int s = 0; s < streams; ++s) {
+                        for (int c = 3; c < 35; ++c) {
+                            *(target++) =
+                                IntanChip::amp2uV(little2host16(&*amp + (s + c * streams) * 2));
+                        }
+                        if (!settings.acquireAux | (!isddrstream[s] && isddrstream[s + 1]))
+                            continue;
+                        for (int c = 0; c < 3; ++c) {
+                            if (((ts + 3) % 4) == c)
+                                aux_buffer[s * 3 + c] =
+                                    IntanChip::aux2V(little2host16(&*amp + (s + c * streams) * 2));
+                            *(target++) = aux_buffer[s * 3 + c];
+                        }
+                    }
+                    const auto io = raw.end() - 8 * 2 - 4 - 4;
+                    if (settings.acquireAdc) {
+                        for (int c = 0; c < 8; ++c) {
+                            *(target++) = IntanChip::adc2V(little2host16(&*io + 2 * c));
+                        }
+                    }
+
+                    double _ts;
+                    uint64_t ttl = little2host32(&*io + 16);
+                    sourceBuffers[0]->addToBuffer(&output_buffer[0], &ts, &_ts, &ttl, chunk_size,
+                                                  chunk_size);
+                };
+
+                auto &raw_data = data_queue->get_next_data();
+                std::span<unsigned char> data(raw_data.value().first.get(),
+                                              raw_data.value().second);
+                const int number_of_samples = (data.size() + buffered) / sample_size;
+                if (buffered > 0) {
+                    const int remaining = sample_size - buffered;
+                    std::copy(data.begin(), data.begin() + remaining, buffer.begin() + buffered);
+                    buffered = 0;
+                    data = data.subspan(remaining);
+                    convert_one_sample(buffer);
+                }
+                std::ranges::for_each(data.subspan(0, data.size() / sample_size * sample_size) |
+                                          std::ranges::views::chunk(sample_size),
+                                      convert_one_sample);
+                auto leftover = data.size() % sample_size;
+                std::copy(data.end() - leftover, data.end(), buffer.begin());
+                data_queue->pop_next_data();
+                buffered = leftover;
+            }
+        }))};
 
     isTransmitting = true;
 
@@ -1074,13 +1165,16 @@ bool DeviceThread::startAcquisition()
 bool DeviceThread::stopAcquisition()
 {
     // LOGD("RHD2000 data thread stopping acquisition.");
-    if (stream) {
-        stream.value()->stop();
-    }
-
     if (isThreadRunning()) {
         signalThreadShouldExit();
     }
+    if (stream) {
+        auto &[s, q, t] = stream.value();
+        s->stop();
+        if (t.joinable()) t.join();
+        stream.reset();
+    }
+
 
     if (waitForThreadToExit(500)) {
         // LOGD("RHD2000 data thread exited.");
@@ -1106,52 +1200,12 @@ bool DeviceThread::stopAcquisition()
     // remove commands
     while (!digitalOutputCommands.empty()) digitalOutputCommands.pop();
 
-
     return true;
 }
 
 bool DeviceThread::updateBuffer()
 {
-    return true;
-    if (updateSettingsDuringAcquisition) {
-        LOGD("DAC");
-        for (int k = 0; k < 8; k++) {
-            if (dacChannelsToUpdate[k]) {
-                dacChannelsToUpdate[k] = false;
-                if (dacChannels[k] >= 0) {
-                    evalBoard->config_dac(k, true, dacStream[k], dacChannels[k]);
-                    evalBoard->setDacThreshold(k, (int) abs((dacThresholds[k] / 0.195) + 32768),
-                                               dacThresholds[k] >= 0);
-                    // evalBoard->setDacThresholdVoltage(k, (int) dacThresholds[k]);
-                } else {
-                    evalBoard->enableDac(k, false);
-                }
-            }
-        }
-
-        evalBoard->setTtlMode(settings.ttlMode ? 1 : 0);
-        evalBoard->enableExternalFastSettle(settings.fastTTLSettleEnabled);
-        evalBoard->setExternalFastSettleChannel(settings.fastSettleTTLChannel);
-        evalBoard->setDacHighpassFilter(settings.desiredDAChpf);
-        evalBoard->enableDacHighpassFilter(settings.desiredDAChpfState);
-
-        updateSettingsDuringAcquisition = false;
-    }
-
-    if (!digitalOutputCommands.empty()) {
-        while (!digitalOutputCommands.empty()) {
-            DigitalOutputCommand command = digitalOutputCommands.front();
-            TTL_OUTPUT_STATE[command.ttlLine] = command.state;
-            digitalOutputCommands.pop();
-        }
-
-        evalBoard->setTtlOut(TTL_OUTPUT_STATE);
-
-        LOGB("TTL OUTPUT STATE: ", TTL_OUTPUT_STATE[0], TTL_OUTPUT_STATE[1], TTL_OUTPUT_STATE[2],
-             TTL_OUTPUT_STATE[3], TTL_OUTPUT_STATE[4], TTL_OUTPUT_STATE[5], TTL_OUTPUT_STATE[6],
-             TTL_OUTPUT_STATE[7]);
-    }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
     return true;
 }
 
