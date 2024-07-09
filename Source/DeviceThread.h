@@ -226,7 +226,7 @@ private:
     bool deviceFound;
 
     /** True if data is streaming*/
-    bool isTransmitting;
+    std::atomic_bool isTransmitting;
 
     /** True if change in settings is needed during acquisition*/
     bool updateSettingsDuringAcquisition = false;
@@ -288,9 +288,6 @@ private:
 
     /** Open the connection to the acquisition board*/
     bool openBoard(String pathToLibrary);
-
-    /** Upload the bitfile*/
-    bool uploadBitfile(String pathToBitfile);
 
     /** Initialize the board*/
     void initializeBoard();

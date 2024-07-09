@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.5.0)
+cmake_policy(SET CMP0087 NEW)
 if (NOT DEFINED GUI_BASE_DIR)
 	if (DEFINED ENV{GUI_BASE_DIR})
 		set(GUI_BASE_DIR $ENV{GUI_BASE_DIR})
@@ -117,9 +118,13 @@ target_link_libraries(${PLUGIN_NAME}
 	xdaq::xdaq
 	nlohmann_json::nlohmann_json
 )
-if (MSVC)
-	install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/xdaq.bit DESTINATION ${GUI_BIN_DIR}/shared)
-elseif(LINUX)
-elseif(APPLE)
-	install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/Resources/xdaq.bit DESTINATION ${GUI_BASE_DIR}/Build/open-ephys.app/Contents/Resources/shared)
+
+if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
+	list(GET XDAQ_PLUGIN_TARGETS 0 first_xdaq_plugin)
+	install(DIRECTORY $<TARGET_FILE_DIR:xdaq::${first_xdaq_plugin}>
+		DESTINATION ${GUI_BIN_DIR}/shared/xdaq
+	)
+	install(DIRECTORY ${XDAQ_RESOURCES_DIR} DESTINATION ${GUI_BIN_DIR}/shared/xdaq)
+elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
 endif()

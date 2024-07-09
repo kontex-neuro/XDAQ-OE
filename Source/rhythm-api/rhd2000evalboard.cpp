@@ -242,46 +242,12 @@ Rhd2000EvalBoard::~Rhd2000EvalBoard()
 
 // Find an Opal Kelly XEM6310-LX45 board attached to a USB port and open it.
 // Returns 1 if successful, -1 if FrontPanel cannot be loaded, and -2 if XEM6310 can't be found.
-int Rhd2000EvalBoard::open(const char *libname)
+int Rhd2000EvalBoard::open(xdaq::DevicePlugin::PluginOwnedDevice dev)
 {
-    lock_guard<mutex> lockOk(okMutex);
-    constexpr bool use_ok = true;
-    auto plugin = xdaq::get_plugin(use_ok ? "C:/usr/local/bin/ok_device_plugin.dll"
-                                          : "C:/usr/local/bin/xdma_device_plugin.dll");
-    auto devices = json::parse(plugin->list_devices());
-    auto device = devices[0];
-    device["mode"] = "rhd";
-    if (use_ok) device["bitfile_dir"] = "/libxdaq/bitfiles";
-    try {
-        dev = plugin->create_device(device.dump());
-    } catch (const std::exception &e) {
-        cerr << "Error in Rhd2000EvalBoard::open: " << e.what() << endl;
-        return -1;
-    }
-    // okCFrontPanel::ErrorCode result = dev->OpenBySerial(serialNumber);
-    // // Attempt to open device.
-    // if (result != okCFrontPanel::NoError) {
-    //     delete dev;
-    //     cerr << "Device could not be opened.  Is one connected?" << endl;
-    //     cerr << "Error = " << result << endl;
-    //     return -2;
-    // }
-
-    // // Get some general information about the XEM.
-    // cout << "Opal Kelly device firmware version: " << dev->GetDeviceMajorVersion() << "."
-    //      << dev->GetDeviceMinorVersion() << endl;
-    // cout << "Opal Kelly device serial number: " << dev->GetSerialNumber().c_str() << endl;
-    // cout << "Opal Kelly device ID string: " << dev->GetDeviceID().c_str() << endl << endl;
-
-    return 1;
-}
-
-// Uploads the configuration file (bitfile) to the FPGA.  Returns true if successful.
-bool Rhd2000EvalBoard::uploadFpgaBitfile(string filename)
-{
+    this->dev = std::move(dev);
     expander = true;
     is_open = true;
-    return true;
+    return 1;
 }
 
 // Initialize Rhythm FPGA to default starting values.
@@ -1384,7 +1350,7 @@ vector<int> find_optimal_delays_greedy(
 
 const std::vector<IntanChip::Chip> &Rhd2000EvalBoard::scan_chips()
 {
-    if (false) {
+    if (true) {
         for (int i = 0; i < ports.max_streams; ++i) enableDataStream(i, true);
         for (int i = 0; i < ports.max_chips; ++i) {
             if (i != 8 && i != 9) {

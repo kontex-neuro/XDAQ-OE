@@ -21,10 +21,13 @@
 
 */
 
+#include <VisualizerEditorHeaders.h>
+
 #include "rhythm-api/intan_chip.h"
 #include "rhythm-api/rhd2000datablock.h"
 #ifdef _WIN32
 #define NOMINMAX
+#include <windows.h>
 #endif
 
 
@@ -33,6 +36,8 @@
 #include <algorithm>
 #include <cassert>
 #include <chrono>
+#include <filesystem>
+#include <nlohmann/json.hpp>
 #include <ranges>
 
 #include "DeviceEditor.h"
@@ -42,8 +47,11 @@
 #include "rhythm-api/utils.h"
 
 
+using json = nlohmann::json;
 
 using namespace RhythmNode;
+using namespace std::string_literals;
+namespace fs = std::filesystem;
 
 // #define DEBUG_EMULATE_HEADSTAGES 8
 // #define DEBUG_EMULATE_64CH
@@ -210,62 +218,148 @@ Array<int> DeviceThread::getDACchannels() const
 
 bool DeviceThread::openBoard(String pathToLibrary)
 {
-    int return_code = evalBoard->open("");
+    std::vector<std::tuple<std::string, std::string, std::string>> device_options;
+    auto sharedDir =
+        fs::path(CoreServices::getSavedStateDirectory().getFullPathName().toStdString());
+    if (fs::exists(sharedDir / "shared"))
+        sharedDir = sharedDir / "shared";
+    else {
+        sharedDir = sharedDir / ("shared-api" + std::to_string(PLUGIN_API_VER));
+        if (!fs::exists(sharedDir)) throw std::runtime_error("Shared directory not found");
+    }
 
-    if (return_code == 1) {
-        deviceFound = true;
-    } else if (return_code == -1)  // dynamic library not found
-    {
-        deviceFound = false;
-    } else if (return_code == -2)  // board could not be opened
-    {
-        bool response = AlertWindow::showOkCancelBox(
-            AlertWindow::NoIcon, "Acquisition board not found.",
-            "An acquisition board could not be found. Please connect one now.", "OK", "Cancel", 0,
-            0);
-
-        if (response) {
-            openBoard("");  // call recursively
-        } else {
-            deviceFound = false;
+    auto xdaq_dir = sharedDir / "xdaq";
+#if defined(_WIN32)
+    constexpr auto shared_extension = ".dll";
+    SetDllDirectoryA((xdaq_dir / "plugin").generic_string().c_str());
+#elif defined(__APPLE__)
+    constexpr auto shared_extension = ".dylib";
+#elif defined(__linux__)
+    constexpr auto shared_extension = ".so";
+#else
+    static_assert(false, "Unsupported platform");
+#endif
+    const auto plugin_paths =
+        fs::directory_iterator(xdaq_dir / "plugin") |
+        std::views::filter([=](const fs::directory_entry &entry) {
+            if (fs::is_directory(entry)) return false;
+            if (!entry.path().filename().generic_string().contains("device_plugin")) return false;
+            return entry.path().extension() == shared_extension;
+        }) |
+        std::views::transform([](auto ent) { return fs::path(ent); }) |
+        std::ranges::to<std::vector>();
+    for (auto &path : plugin_paths) {
+        fmt::print("Loading plugin: {}\n", path.generic_string());
+        auto plugin = xdaq::get_plugin(path);
+        auto info = json::parse(plugin->info());
+        fmt::print("Plugin: {}\n", info.dump(4));
+        for (auto &device : json::parse(plugin->list_devices())) {
+            fmt::print("Device: {}\n", device.dump(4));
+            device["mode"] = "rhd";
+            device_options.push_back(
+                {info["name"].get<std::string>(), path.generic_string(), device.dump()});
         }
     }
 
-    return deviceFound;
-}
+    class DeviceSelector : public Component, public TableListBoxModel, public Button::Listener
+    {
+    public:
+        DeviceSelector(std::vector<std::tuple<std::string, std::string, std::string>> &options)
+            : options(options)
+        {
+            table.getHeader().addColumn("Name", 1, 150);
+            table.getHeader().addColumn("Info", 2, 300);
+            table.setColour(juce::ListBox::outlineColourId, juce::Colours::grey);
+            table.setOutlineThickness(1);
+            table.setBounds(10, 10, 452, 200);
+            addAndMakeVisible(table);
+            acceptButton.setBounds(196, 260, 80, 20);
+            acceptButton.addListener(this);
+            addAndMakeVisible(acceptButton);
+        }
+        ~DeviceSelector() override {}
 
-bool DeviceThread::uploadBitfile(String bitfilename)
-{
-    deviceFound = true;
+        int getNumRows() override { return options.size(); };
 
-    if (!evalBoard->uploadFpgaBitfile(bitfilename.toStdString())) {
-        LOGD("Couldn't upload bitfile from ", bitfilename);
+        void paintCell(juce::Graphics &g, int rowNumber, int columnId, int width, int height,
+                       bool rowIsSelected) override
+        {
+            g.setColour(rowIsSelected ? juce::Colours::darkblue
+                                      : getLookAndFeel().findColour(juce::ListBox::textColourId));
+            const auto &[plugin, path, device] = options[rowNumber];
+            if (columnId == 1)
+                g.drawText(plugin, 2, 0, width - 4, height, juce::Justification::centredLeft, true);
+            else if (columnId == 2)
+                g.drawText(device, 2, 0, width - 4, height, juce::Justification::centredLeft, true);
 
-        bool response =
-            AlertWindow::showOkCancelBox(AlertWindow::NoIcon, "FPGA bitfile not found.",
-                                         "The xdaq.bit file was not found in the directory of the "
-                                         "executable. Would you like to browse for it?",
-                                         "Yes", "No", 0, 0);
-        if (response) {
-            // browse for file
-            FileChooser fc("Select the FPGA bitfile...", File::getCurrentWorkingDirectory(),
-                           "*.bit", true);
+            g.setColour(getLookAndFeel().findColour(juce::ListBox::backgroundColourId));
+            g.fillRect(width - 1, 0, 1, height);
+        }
 
-            if (fc.browseForFileToOpen()) {
-                File currentFile = fc.getResult();
+        void paintRowBackground(juce::Graphics &g, int rowNumber, int /*width*/, int /*height*/,
+                                bool rowIsSelected) override
+        {
+            auto alternateColour =
+                getLookAndFeel()
+                    .findColour(juce::ListBox::backgroundColourId)
+                    .interpolatedWith(getLookAndFeel().findColour(juce::ListBox::textColourId),
+                                      0.03f);
+            if (rowIsSelected)
+                g.fillAll(juce::Colours::lightblue);
+            else if (rowNumber % 2)
+                g.fillAll(alternateColour);
+        }
 
-                uploadBitfile(currentFile.getFullPathName());  // call recursively
-            } else {
-                deviceFound = false;
+        void buttonClicked(Button *button)
+        {
+            if (table.getSelectedRow() == -1) {
+                AlertWindow::showMessageBox(AlertWindow::WarningIcon, "No device selected",
+                                            "Please select a device to launch", "OK");
+                return;
             }
-
-        } else {
-            deviceFound = false;
+            if (DialogWindow *dw = findParentComponentOfClass<DialogWindow>())
+                dw->exitModalState(table.getSelectedRow());
         }
+
+        void cellDoubleClicked(int rowNumber, int columnId, const MouseEvent &) override
+        {
+            if (DialogWindow *dw = findParentComponentOfClass<DialogWindow>())
+                dw->exitModalState(rowNumber);
+        }
+
+    private:
+        TableListBox table{{}, this};
+        UtilityButton acceptButton{"LAUNCH", Font("Small Text", 13, Font::plain)};
+        std::vector<std::tuple<std::string, std::string, std::string>> &options;
+    };
+
+    // TODO: handle no devices, adding refresh button
+    // TODO: handle only one device, auto-select
+    DialogWindow::LaunchOptions options;
+    options.content.setOwned(new DeviceSelector(device_options));
+    // TODO: dynamic size
+    options.content->setSize(472, 300);
+    options.dialogTitle = "Choose XDAQ";
+    options.dialogBackgroundColour = Colours::darkgrey;
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = false;
+    options.resizable = false;
+
+    int result = options.runModal();
+    const auto &[_, plugin_path, device_config] = device_options[result];
+    auto plugin = xdaq::get_plugin(plugin_path);
+    try {
+        auto dev = plugin->create_device(device_config);
+        // TODO: update api
+        int return_code = evalBoard->open(std::move(dev));
+    } catch (const std::exception &e) {
+        AlertWindow::showMessageBox(AlertWindow::WarningIcon, "Error", e.what(), "OK");
+        return false;
     }
 
-    return deviceFound;
+    return true;
 }
+
 
 void DeviceThread::initializeBoard()
 {
@@ -279,9 +373,7 @@ void DeviceThread::initializeBoard()
 
     bitfilename = sharedDir.getFullPathName() + File::getSeparatorString() + "xdaq.bit";
 
-    if (!uploadBitfile(bitfilename)) {
-        return;
-    }
+    deviceFound = true;
 
     // Initialize the board
     LOGD("Initializing XDAQ.");
@@ -966,7 +1058,7 @@ void DeviceThread::updateRegisters()
 
 struct DeviceThread::DataQueue {
     // only one producer and one consumer, undefined behavior otherwise
-    constexpr static int N = 128;
+    constexpr static int N = 512;
     using value_type = std::optional<
         std::pair<std::unique_ptr<unsigned char[], void (*)(unsigned char[])>, std::size_t>>;
     std::vector<value_type> data_buffers = std::vector<value_type>(N);
@@ -987,6 +1079,7 @@ struct DeviceThread::DataQueue {
 
     void pop_next_data()
     {
+        data_buffers[next_data].value().first.reset();
         data_buffers[next_data] = std::nullopt;
         next_data = (next_data + 1) % N;
     }
@@ -1011,9 +1104,96 @@ bool DeviceThread::startAcquisition()
     evalBoard->set_dio32(true);
 
     auto data_queue = new DataQueue();
+
+    startThread();
+    auto process_thread = std::thread([data_queue, this]() {
+        const int chunk_size = 1;
+        int buffer_samples;
+        const auto streams = evalBoard->getNumEnabledDataStreams();
+        const auto sample_size = evalBoard->get_sample_size<char>();
+        auto buffer = std::vector<unsigned char>(evalBoard->get_sample_size<char>());
+        std::size_t buffered = 0;
+        std::vector<bool> isddrstream;
+        auto aux_buffer = std::array<float, 32 * 3>();
+        int nonddr = 0;
+        for (int i = 0; i < evalBoard->ports.max_streams; ++i) {
+            if (!evalBoard->isStreamEnabled(i)) continue;
+            bool ddr = evalBoard->ports.is_ddr(i);
+            isddrstream.push_back(ddr);
+            nonddr += !ddr;
+        }
+        isddrstream.push_back(false);
+
+        const int current_aquisition_channels =
+            (32 * evalBoard->getNumEnabledDataStreams() + nonddr * 3 * settings.acquireAux +
+             +settings.acquireAdc * evalBoard->ports.num_of_adc);
+
+        auto output_buffer = std::vector<float>(current_aquisition_channels * 1);
+        while (isThreadRunning()) {
+            if (data_queue->maybe_empty()) {
+                std::this_thread::sleep_for(std::chrono::microseconds(500));
+                continue;
+            }
+            using namespace utils::endian;
+            auto convert_one_sample = [&](std::ranges::viewable_range auto &&raw) {
+                if (little2host64(raw.data()) != RHD2000_HEADER_MAGIC_NUMBER) {
+                    fmt::print("Failed to parse data\n");
+                    throw std::runtime_error("Failed to parse data");
+                }
+                std::int64_t ts = little2host32(raw.data() + 8);
+                auto target = output_buffer.begin();
+                const auto amp = raw.begin() + 12;
+                for (int s = 0; s < streams; ++s) {
+                    for (int c = 3; c < 35; ++c) {
+                        *(target++) =
+                            IntanChip::amp2uV(little2host16(&*amp + (s + c * streams) * 2));
+                    }
+                    if (!settings.acquireAux | (!isddrstream[s] && isddrstream[s + 1])) continue;
+                    for (int c = 0; c < 3; ++c) {
+                        if (((ts + 3) % 4) == c)
+                            aux_buffer[s * 3 + c] =
+                                IntanChip::aux2V(little2host16(&*amp + (s + c * streams) * 2));
+                        *(target++) = aux_buffer[s * 3 + c];
+                    }
+                }
+                const auto io = raw.end() - 8 * 2 - 4 - 4;
+                if (settings.acquireAdc) {
+                    for (int c = 0; c < 8; ++c) {
+                        *(target++) = IntanChip::adc2V(little2host16(&*io + 2 * c));
+                    }
+                }
+
+                double _ts;
+                uint64_t ttl = little2host32(&*io + 16);
+                sourceBuffers[0]->addToBuffer(&output_buffer[0], &ts, &_ts, &ttl, chunk_size,
+                                              chunk_size);
+            };
+
+            auto &raw_data = data_queue->get_next_data();
+            std::span<unsigned char> data(raw_data.value().first.get(), raw_data.value().second);
+            const int number_of_samples = (data.size() + buffered) / sample_size;
+            if (buffered > 0) {
+                const int remaining = sample_size - buffered;
+                std::copy(data.begin(), data.begin() + remaining, buffer.begin() + buffered);
+                buffered = 0;
+                data = data.subspan(remaining);
+                convert_one_sample(buffer);
+            }
+            std::ranges::for_each(data.subspan(0, data.size() / sample_size * sample_size) |
+                                      std::ranges::views::chunk(sample_size),
+                                  convert_one_sample);
+            auto leftover = data.size() % sample_size;
+            std::copy(data.end() - leftover, data.end(), buffer.begin());
+            data_queue->pop_next_data();
+            buffered = leftover;
+        }
+    });
     auto new_stream = evalBoard->dev->start_read_stream(
         0xa0, [data_queue, this](auto raw_data, std::size_t length) {
             // TODO: need to handle the case where the queue is full
+            if (data_queue->approximate_size() > 10) {
+                fmt::print("Queue {}\n", data_queue->approximate_size());
+            }
             if (data_queue->maybe_full()) {
                 LOGE("System is too slow to keep up with data acquisition, dropping data");
                 return;
@@ -1066,96 +1246,9 @@ bool DeviceThread::startAcquisition()
         return false;
     }
 
-    startThread();
-
-    stream = {std::make_tuple<
-        std::unique_ptr<xdaq::DevicePlugin::PluginOwnedDevice::element_type::DataStream>,
-        std::unique_ptr<DataQueue>, std::thread>(
-        {std::move(new_stream.value())}, std::unique_ptr<DataQueue>(data_queue),
-        std::thread([data_queue, this]() {
-            const int chunk_size = 1;
-            int buffer_samples;
-            const auto streams = evalBoard->getNumEnabledDataStreams();
-            const auto sample_size = evalBoard->get_sample_size<char>();
-            auto buffer = std::vector<unsigned char>(evalBoard->get_sample_size<char>());
-            std::size_t buffered = 0;
-            std::vector<bool> isddrstream;
-            auto aux_buffer = std::array<float, 32 * 3>();
-            int nonddr = 0;
-            for (int i = 0; i < evalBoard->ports.max_streams; ++i) {
-                if (!evalBoard->isStreamEnabled(i)) continue;
-                bool ddr = evalBoard->ports.is_ddr(i);
-                isddrstream.push_back(ddr);
-                nonddr += !ddr;
-            }
-            isddrstream.push_back(false);
-
-            const int current_aquisition_channels =
-                (32 * evalBoard->getNumEnabledDataStreams() + nonddr * 3 * settings.acquireAux +
-                 +settings.acquireAdc * evalBoard->ports.num_of_adc);
-
-            auto output_buffer = std::vector<float>(current_aquisition_channels * 1);
-            while (isThreadRunning()) {
-                if (data_queue->maybe_empty()) {
-                    std::this_thread::sleep_for(std::chrono::microseconds(500));
-                    continue;
-                }
-                using namespace utils::endian;
-                auto convert_one_sample = [&](std::ranges::viewable_range auto &&raw) {
-                    if (little2host64(raw.data()) != RHD2000_HEADER_MAGIC_NUMBER) {
-                        fmt::print("Failed to parse data\n");
-                        throw std::runtime_error("Failed to parse data");
-                    }
-                    std::int64_t ts = little2host32(raw.data() + 8);
-                    auto target = output_buffer.begin();
-                    const auto amp = raw.begin() + 12;
-                    for (int s = 0; s < streams; ++s) {
-                        for (int c = 3; c < 35; ++c) {
-                            *(target++) =
-                                IntanChip::amp2uV(little2host16(&*amp + (s + c * streams) * 2));
-                        }
-                        if (!settings.acquireAux | (!isddrstream[s] && isddrstream[s + 1]))
-                            continue;
-                        for (int c = 0; c < 3; ++c) {
-                            if (((ts + 3) % 4) == c)
-                                aux_buffer[s * 3 + c] =
-                                    IntanChip::aux2V(little2host16(&*amp + (s + c * streams) * 2));
-                            *(target++) = aux_buffer[s * 3 + c];
-                        }
-                    }
-                    const auto io = raw.end() - 8 * 2 - 4 - 4;
-                    if (settings.acquireAdc) {
-                        for (int c = 0; c < 8; ++c) {
-                            *(target++) = IntanChip::adc2V(little2host16(&*io + 2 * c));
-                        }
-                    }
-
-                    double _ts;
-                    uint64_t ttl = little2host32(&*io + 16);
-                    sourceBuffers[0]->addToBuffer(&output_buffer[0], &ts, &_ts, &ttl, chunk_size,
-                                                  chunk_size);
-                };
-
-                auto &raw_data = data_queue->get_next_data();
-                std::span<unsigned char> data(raw_data.value().first.get(),
-                                              raw_data.value().second);
-                const int number_of_samples = (data.size() + buffered) / sample_size;
-                if (buffered > 0) {
-                    const int remaining = sample_size - buffered;
-                    std::copy(data.begin(), data.begin() + remaining, buffer.begin() + buffered);
-                    buffered = 0;
-                    data = data.subspan(remaining);
-                    convert_one_sample(buffer);
-                }
-                std::ranges::for_each(data.subspan(0, data.size() / sample_size * sample_size) |
-                                          std::ranges::views::chunk(sample_size),
-                                      convert_one_sample);
-                auto leftover = data.size() % sample_size;
-                std::copy(data.end() - leftover, data.end(), buffer.begin());
-                data_queue->pop_next_data();
-                buffered = leftover;
-            }
-        }))};
+    stream = {{std::unique_ptr<xdaq::DevicePlugin::PluginOwnedDevice::element_type::DataStream>{
+                   std::move(new_stream.value())},
+               std::unique_ptr<DataQueue>(data_queue), std::move(process_thread)}};
 
     isTransmitting = true;
 
@@ -1172,6 +1265,7 @@ bool DeviceThread::stopAcquisition()
         auto &[s, q, t] = stream.value();
         s->stop();
         if (t.joinable()) t.join();
+        while (!q->maybe_empty()) q->pop_next_data();
         stream.reset();
     }
 
@@ -1205,7 +1299,7 @@ bool DeviceThread::stopAcquisition()
 
 bool DeviceThread::updateBuffer()
 {
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     return true;
 }
 

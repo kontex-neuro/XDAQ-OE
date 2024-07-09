@@ -64,8 +64,7 @@ public:
     }
 
 
-    int open(const char *libname);
-    bool uploadFpgaBitfile(std::string filename);
+    int open(xdaq::DevicePlugin::PluginOwnedDevice dev);
     void initialize();
 
     // int FPGA_board;
