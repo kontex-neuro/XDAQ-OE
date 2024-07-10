@@ -218,7 +218,13 @@ Array<int> DeviceThread::getDACchannels() const
 
 bool DeviceThread::openBoard(String pathToLibrary)
 {
-    std::vector<std::tuple<std::string, std::string, std::string>> device_options;
+    struct info {
+        std::string plugin_path;
+        std::string plugin_display_name;
+        json device_config;
+        json device_info;
+    };
+    std::vector<info> device_options;
     auto sharedDir =
         fs::path(CoreServices::getSavedStateDirectory().getFullPathName().toStdString());
     if (fs::exists(sharedDir / "shared"))
@@ -251,21 +257,27 @@ bool DeviceThread::openBoard(String pathToLibrary)
     for (auto &path : plugin_paths) {
         fmt::print("Loading plugin: {}\n", path.generic_string());
         auto plugin = xdaq::get_plugin(path);
-        auto info = json::parse(plugin->info());
-        fmt::print("Plugin: {}\n", info.dump(4));
-        for (auto &device : json::parse(plugin->list_devices())) {
-            fmt::print("Device: {}\n", device.dump(4));
-            device["mode"] = "rhd";
-            device_options.push_back(
-                {info["name"].get<std::string>(), path.generic_string(), device.dump()});
+        auto plugin_info = json::parse(plugin->info());
+        fmt::print("Plugin: {}\n", plugin_info.dump(4));
+        for (auto &device_config : json::parse(plugin->list_devices())) {
+            device_config["mode"] = "rhd";
+            fmt::print("Device: {}\n", device_config.dump(4));
+            auto device = plugin->create_device(device_config.dump());
+            const auto info_str = device->get_info();
+            device_options.push_back({
+                .plugin_path = path.generic_string(),
+                .plugin_display_name = plugin_info["name"].get<std::string>(),
+                .device_config = device_config,
+                .device_info = info_str.has_value() ? json::parse(info_str.value())
+                                                    : json{{"Serial Number", 0}},
+            });
         }
     }
 
     class DeviceSelector : public Component, public TableListBoxModel, public Button::Listener
     {
     public:
-        DeviceSelector(std::vector<std::tuple<std::string, std::string, std::string>> &options)
-            : options(options)
+        DeviceSelector(std::vector<info> &options) : options(options)
         {
             table.getHeader().addColumn("Name", 1, 150);
             table.getHeader().addColumn("Info", 2, 300);
@@ -286,11 +298,16 @@ bool DeviceThread::openBoard(String pathToLibrary)
         {
             g.setColour(rowIsSelected ? juce::Colours::darkblue
                                       : getLookAndFeel().findColour(juce::ListBox::textColourId));
-            const auto &[plugin, path, device] = options[rowNumber];
+            const auto &d = options[rowNumber];
             if (columnId == 1)
-                g.drawText(plugin, 2, 0, width - 4, height, juce::Justification::centredLeft, true);
+                g.drawText(d.plugin_display_name, 2, 0, width - 4, height,
+                           juce::Justification::centredLeft, true);
             else if (columnId == 2)
-                g.drawText(device, 2, 0, width - 4, height, juce::Justification::centredLeft, true);
+                g.drawText(
+                    d.device_info.contains("Serial Number")
+                        ? fmt::format("{:08X}", d.device_info["Serial Number"].get<unsigned int>())
+                        : "N/A",
+                    2, 0, width - 4, height, juce::Justification::centredLeft, true);
 
             g.setColour(getLookAndFeel().findColour(juce::ListBox::backgroundColourId));
             g.fillRect(width - 1, 0, 1, height);
@@ -330,7 +347,7 @@ bool DeviceThread::openBoard(String pathToLibrary)
     private:
         TableListBox table{{}, this};
         UtilityButton acceptButton{"LAUNCH", Font("Small Text", 13, Font::plain)};
-        std::vector<std::tuple<std::string, std::string, std::string>> &options;
+        std::vector<info> &options;
     };
 
     // TODO: handle no devices, adding refresh button
@@ -346,10 +363,10 @@ bool DeviceThread::openBoard(String pathToLibrary)
     options.resizable = false;
 
     int result = options.runModal();
-    const auto &[_, plugin_path, device_config] = device_options[result];
-    auto plugin = xdaq::get_plugin(plugin_path);
+    const auto &selected_device = device_options[result];
+    auto plugin = xdaq::get_plugin(selected_device.plugin_path);
     try {
-        auto dev = plugin->create_device(device_config);
+        auto dev = plugin->create_device(selected_device.device_config.dump());
         // TODO: update api
         int return_code = evalBoard->open(std::move(dev));
     } catch (const std::exception &e) {
