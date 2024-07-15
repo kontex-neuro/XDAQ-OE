@@ -53,10 +53,7 @@ void ChannelCanvas::refresh() { repaint(); }
 
 void ChannelCanvas::refreshState() { resized(); }
 
-void ChannelCanvas::update()
-{
-    channelList->update();
-}
+void ChannelCanvas::update() { channelList->update(); }
 
 void ChannelCanvas::beginAnimation() { channelList->disableAll(); }
 
@@ -70,7 +67,7 @@ void ChannelCanvas::resized()
 
     int enabled_headstages = 0;
     for (auto &hs : board->get_headstages()) enabled_headstages += hs.isConnected();
-    const auto width = 10 + enabled_headstages * 200;
+    const auto width = std::max<std::size_t>(10 + enabled_headstages * 200, 600);
     channelList->setBounds(0, 0, width - scrollBarThickness,
                            200 + 22 * channelList->getMaxChannels());
 }
