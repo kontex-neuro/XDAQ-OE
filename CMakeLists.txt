@@ -79,7 +79,7 @@ endif()
 #Libraries and compiler options
 if(MSVC)
 	target_compile_definitions(${PLUGIN_NAME} PRIVATE NOMINMAX)
-	target_link_libraries(${PLUGIN_NAME} ${GUI_BIN_DIR}/open-ephys.lib)
+	target_link_libraries(${PLUGIN_NAME} PRIVATE ${GUI_BIN_DIR}/open-ephys.lib)
 	target_compile_options(${PLUGIN_NAME} PRIVATE /sdl- /W0)
 	
 	install(TARGETS ${PLUGIN_NAME} RUNTIME DESTINATION ${GUI_BIN_DIR}/plugins  CONFIGURATIONS ${CMAKE_CONFIGURATION_TYPES})
