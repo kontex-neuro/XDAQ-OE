@@ -27,7 +27,9 @@
 
 #include <array>
 #include <atomic>
+#include <memory>
 #include <optional>
+#include <thread>
 #include <vector>
 
 #include "Headstage.h"

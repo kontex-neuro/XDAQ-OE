@@ -41,8 +41,9 @@ set_property(DIRECTORY APPEND PROPERTY COMPILE_DEFINITIONS
 set(SOURCE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Source)
 file(GLOB_RECURSE SRC_FILES LIST_DIRECTORIES false "${SOURCE_PATH}/*.cpp" "${SOURCE_PATH}/*.h")
 set(GUI_COMMONLIB_DIR ${GUI_BASE_DIR}/installed_libs)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
-set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD 20)
 
 set(CONFIGURATION_FOLDER $<$<CONFIG:Debug>:Debug>$<$<NOT:$<CONFIG:Debug>>:Release>)
 
@@ -113,7 +114,7 @@ find_package(xdaq REQUIRED)
 find_package(fmt REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
-target_link_libraries(${PLUGIN_NAME}
+target_link_libraries(${PLUGIN_NAME} PRIVATE
 	fmt::fmt
 	xdaq::xdaq
 	nlohmann_json::nlohmann_json
@@ -127,4 +128,11 @@ if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
 	install(DIRECTORY ${XDAQ_RESOURCES_DIR} DESTINATION ${GUI_BIN_DIR}/shared/xdaq)
 elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
 elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
+	list(GET XDAQ_PLUGIN_TARGETS 0 first_xdaq_plugin)
+	install(DIRECTORY $<TARGET_FILE_DIR:xdaq::${first_xdaq_plugin}>
+		DESTINATION $ENV{HOME}/Library/Application\ Support/open-ephys/shared-api8/xdaq
+	)
+	install(DIRECTORY ${XDAQ_RESOURCES_DIR}
+		DESTINATION $ENV{HOME}/Library/Application\ Support/open-ephys/shared-api8/xdaq
+	)
 endif()

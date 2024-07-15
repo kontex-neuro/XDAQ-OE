@@ -245,15 +245,25 @@ bool DeviceThread::openBoard(String pathToLibrary)
 #else
     static_assert(false, "Unsupported platform");
 #endif
-    const auto plugin_paths =
+    auto plugin_paths_range =
         fs::directory_iterator(xdaq_dir / "plugin") |
         std::views::filter([=](const fs::directory_entry &entry) {
+            fmt::print("Checking: {}\n", entry.path().generic_string());
             if (fs::is_directory(entry)) return false;
-            if (!entry.path().filename().generic_string().contains("device_plugin")) return false;
+            // C++23: std::basic_string<CharT,Traits,Allocator>::contains
+            if (entry.path().filename().generic_string().find("device_plugin") == std::string::npos)
+                return false;
             return entry.path().extension() == shared_extension;
         }) |
-        std::views::transform([](auto ent) { return fs::path(ent); }) |
-        std::ranges::to<std::vector>();
+        std::views::transform([](auto ent) { return fs::canonical(fs::path(ent)); });
+    // C++23: std::ranges::to ref: https://stackoverflow.com/a/60971856
+    // | std::ranges::to<std::vector>();
+    std::vector<fs::path> plugin_paths;
+    for (auto path : plugin_paths_range) plugin_paths.push_back(path);
+    // remove duplicates
+    std::ranges::sort(plugin_paths);
+    plugin_paths.erase(std::unique(plugin_paths.begin(), plugin_paths.end()), plugin_paths.end());
+
     for (auto &path : plugin_paths) {
         fmt::print("Loading plugin: {}\n", path.generic_string());
         auto plugin = xdaq::get_plugin(path);
@@ -264,12 +274,13 @@ bool DeviceThread::openBoard(String pathToLibrary)
             fmt::print("Device: {}\n", device_config.dump(4));
             auto device = plugin->create_device(device_config.dump());
             const auto info_str = device->get_info();
+            fmt::print("Info: {}\n", info_str.value_or("N/A"));
             device_options.push_back({
                 .plugin_path = path.generic_string(),
                 .plugin_display_name = plugin_info["name"].get<std::string>(),
                 .device_config = device_config,
                 .device_info = info_str.has_value() ? json::parse(info_str.value())
-                                                    : json{{"Serial Number", 0}},
+                                                    : json{{"Serial Number", "N/A"}},
             });
         }
     }
@@ -280,7 +291,7 @@ bool DeviceThread::openBoard(String pathToLibrary)
         DeviceSelector(std::vector<info> &options) : options(options)
         {
             table.getHeader().addColumn("Name", 1, 150);
-            table.getHeader().addColumn("Info", 2, 300);
+            table.getHeader().addColumn("Serial Number", 2, 300);
             table.setColour(juce::ListBox::outlineColourId, juce::Colours::grey);
             table.setOutlineThickness(1);
             table.setBounds(10, 10, 452, 200);
@@ -305,7 +316,7 @@ bool DeviceThread::openBoard(String pathToLibrary)
             else if (columnId == 2)
                 g.drawText(
                     d.device_info.contains("Serial Number")
-                        ? fmt::format("{:08X}", d.device_info["Serial Number"].get<unsigned int>())
+                        ? fmt::format("{}", d.device_info["Serial Number"].get<std::string>())
                         : "N/A",
                     2, 0, width - 4, height, juce::Justification::centredLeft, true);
 
@@ -327,7 +338,7 @@ bool DeviceThread::openBoard(String pathToLibrary)
                 g.fillAll(alternateColour);
         }
 
-        void buttonClicked(Button *button)
+        void buttonClicked(Button *button) override
         {
             if (table.getSelectedRow() == -1) {
                 AlertWindow::showMessageBox(AlertWindow::WarningIcon, "No device selected",
@@ -1196,9 +1207,10 @@ bool DeviceThread::startAcquisition()
                 data = data.subspan(remaining);
                 convert_one_sample(buffer);
             }
-            std::ranges::for_each(data.subspan(0, data.size() / sample_size * sample_size) |
-                                      std::ranges::views::chunk(sample_size),
-                                  convert_one_sample);
+            const auto full_samples = data.size() / sample_size;
+            for (int i = 0; i < full_samples; ++i)
+                convert_one_sample(data.subspan(i * sample_size, sample_size));
+
             auto leftover = data.size() % sample_size;
             std::copy(data.end() - leftover, data.end(), buffer.begin());
             data_queue->pop_next_data();
