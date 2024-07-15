@@ -33,17 +33,13 @@
 #include <thread>
 #include <vector>
 
-
-
 #include "intan_chip.h"
 #include "rhd2000datablock.h"
+
 
 using namespace std;
 using std::vector;
 
-#ifdef Q_OS_WIN
-#include <windows.h>  // for Sleep
-#endif
 using json = nlohmann::json;
 
 // Opal Kelly module USB interface endpoint addresses
@@ -123,51 +119,6 @@ constexpr int WireInDacSource[] = {OkEndPoint::WireInDacSource1, OkEndPoint::Wir
                                    OkEndPoint::WireInDacSource5, OkEndPoint::WireInDacSource6,
                                    OkEndPoint::WireInDacSource7, OkEndPoint::WireInDacSource8};
 
-
-#ifdef UseMockOkFrontPanel
-#define okCFrontPanel MockOkCFrontPanel
-#endif
-
-
-template <bool update>
-void set_wire_in(xdaq::Device *dev, int addr, uint32_t value, uint32_t mask = 0xFFFFFFFFu);
-
-template <>
-void set_wire_in<true>(xdaq::Device *dev, int addr, uint32_t value, uint32_t mask)
-{
-    dev->set_register_sync(addr, value, mask);
-}
-
-template <>
-void set_wire_in<false>(xdaq::Device *dev, int addr, uint32_t value, uint32_t mask)
-{
-    dev->set_register(addr, value, mask);
-}
-
-template <bool update>
-uint32_t get_wire_out(xdaq::Device *dev, int addr);
-
-template <>
-uint32_t get_wire_out<true>(xdaq::Device *dev, int addr)
-{
-    return dev->get_register_sync(addr).value();
-}
-
-template <>
-uint32_t get_wire_out<false>(xdaq::Device *dev, int addr)
-{
-    return dev->get_register(addr);
-}
-
-inline void send_trigger_in(xdaq::Device *dev, int trig, int bit, int addr, uint32_t value,
-                            uint32_t mask = 0xFFFFFFFFu)
-{
-    set_wire_in<true>(dev, addr, value, mask);
-    dev->trigger(trig, bit);
-}
-
-inline void send_trigger_in(xdaq::Device *dev, int trig, int bit) { dev->trigger(trig, bit); }
-
 bool Rhd2000EvalBoard::UploadDACData(const vector<uint16_t> &commandList, int dacChannel,
                                      int length)
 {
@@ -193,7 +144,7 @@ bool Rhd2000EvalBoard::UploadDACData(const vector<uint16_t> &commandList, int da
 bool Rhd2000EvalBoard::set_dio32(bool dio32)
 {
     lock_guard<mutex> lockOk(okMutex);
-    set_wire_in<true>(dev.get(), Enable32bitDIO, dio32 * 0x04, 0x04);
+    dev->set_register_sync(Enable32bitDIO, dio32 * 0x04, 0x04);
     // this->dio32 = dio32;
     return dio32;
 }
@@ -266,7 +217,7 @@ void Rhd2000EvalBoard::initialize()
     setDspSettle(false);
 
     // Must first force all data streams off
-    set_wire_in<true>(dev.get(), WireInDataStreamEn, 0);
+    dev->set_register_sync(WireInDataStreamEn, 0);
 
     enableDataStream(0, true);  // start with only one data stream enabled
     for (int i = 1; i < MAX_NUM_DATA_STREAMS; i++) {
@@ -437,7 +388,8 @@ bool Rhd2000EvalBoard::setSampleRate(SampleRate newSampleRate)
     while (isDcmProgDone() == false);
 
     // Reprogram clock synthesizer
-    send_trigger_in(dev.get(), TrigInConfig, 0, WireInDataFreqPll, (256 * M + D));
+    dev->set_register_sync(WireInDataFreqPll, (256 * M + D));
+    dev->trigger(TrigInConfig, 0);
 
     // Wait for DataClkLocked = 1 before allowing data acquisition to continue
     while (isDataClockLocked() == false);
@@ -488,11 +440,12 @@ void Rhd2000EvalBoard::uploadCommandList(const std::vector<uint32_t> &commandLis
         return;
     }
 
-    set_wire_in<false>(dev.get(), WireInCmdRamBank, bank);
+    dev->set_register(WireInCmdRamBank, bank);
     const auto aux = static_cast<int>(auxCommandSlot);
     for (size_t i = 0; i < commandList.size(); ++i) {
-        set_wire_in<false>(dev.get(), WireInCmdRamData, commandList[i]);
-        send_trigger_in(dev.get(), TrigInConfig, aux + 1, WireInCmdRamAddr, i);
+        dev->set_register(WireInCmdRamData, commandList[i]);
+        dev->set_register_sync(WireInCmdRamAddr, i);
+        dev->trigger(TrigInConfig, aux + 1);
     }
 }
 
@@ -517,10 +470,9 @@ void Rhd2000EvalBoard::selectAuxCommandBank(SPIPort port, AuxCmdSlot auxCommandS
         mask = 0xf << static_cast<int>(port) * 4;
     }
     if (auxCommandSlot == AuxCmdSlot::All) {
-        for (int i = 0; i < 3; ++i) set_wire_in<true>(dev.get(), WireInAuxCmdBank[i], value, mask);
+        for (int i = 0; i < 3; ++i) dev->set_register_sync(WireInAuxCmdBank[i], value, mask);
     } else {
-        set_wire_in<true>(dev.get(), WireInAuxCmdBank[static_cast<int>(auxCommandSlot)], value,
-                          mask);
+        dev->set_register_sync(WireInAuxCmdBank[static_cast<int>(auxCommandSlot)], value, mask);
     }
 }
 
@@ -542,14 +494,12 @@ void Rhd2000EvalBoard::selectAuxCommandLength(AuxCmdSlot auxCommandSlot, int loo
     }
 
     if (auxCommandSlot == AuxCmdSlot::All) {
-        set_wire_in<false>(dev.get(), WireInAuxCmdLoop,
-                           loopIndex | (loopIndex << 10) | (loopIndex << 20));
-        set_wire_in<true>(dev.get(), WireInAuxCmdLength,
-                          endIndex | (endIndex << 10) | (endIndex << 20));
+        dev->set_register(WireInAuxCmdLoop, loopIndex | (loopIndex << 10) | (loopIndex << 20));
+        dev->set_register_sync(WireInAuxCmdLength, endIndex | (endIndex << 10) | (endIndex << 20));
     } else {
         const auto aux = static_cast<int>(auxCommandSlot);
-        set_wire_in<false>(dev.get(), WireInAuxCmdLoop, loopIndex << aux * 10, 0x3ff << aux * 10);
-        set_wire_in<true>(dev.get(), WireInAuxCmdLength, endIndex << aux * 10, 0x3ff << aux * 10);
+        dev->set_register(WireInAuxCmdLoop, loopIndex << aux * 10, 0x3ff << aux * 10);
+        dev->set_register_sync(WireInAuxCmdLength, endIndex << aux * 10, 0x3ff << aux * 10);
     }
 }
 
@@ -624,12 +574,11 @@ void Rhd2000EvalBoard::setCableDelay(SPIPort port, int delay)
     }
 
     if (port == SPIPort::All) {
-        if (delay >= 0) set_wire_in<true>(dev.get(), WireInMisoDelay, delay * 0x11111111llu);
+        if (delay >= 0) dev->set_register_sync(WireInMisoDelay, delay * 0x11111111llu);
         std::fill(cableDelay.begin(), cableDelay.end(), delay);
     } else {
         const auto idx = static_cast<int>(port);
-        if (delay >= 0)
-            set_wire_in<true>(dev.get(), WireInMisoDelay, delay << 4 * idx, 0xf << 4 * idx);
+        if (delay >= 0) dev->set_register_sync(WireInMisoDelay, delay << 4 * idx, 0xf << 4 * idx);
         cableDelay[idx] = delay;
     }
 }
@@ -727,13 +676,13 @@ void Rhd2000EvalBoard::enableDataStream(int stream, bool enabled)
 
     if (enabled) {
         if (dataStreamEnabled[stream] == 0) {
-            set_wire_in<true>(dev.get(), WireInDataStreamEn, 1 << stream, 1 << stream);
+            dev->set_register_sync(WireInDataStreamEn, 1 << stream, 1 << stream);
             dataStreamEnabled[stream] = 1;
             numDataStreams++;
         }
     } else {
         if (dataStreamEnabled[stream] == 1) {
-            set_wire_in<true>(dev.get(), WireInDataStreamEn, 0, 1 << stream);
+            dev->set_register_sync(WireInDataStreamEn, 0, 1 << stream);
             dataStreamEnabled[stream] = 0;
             numDataStreams--;
         }
@@ -826,7 +775,7 @@ void Rhd2000EvalBoard::enableDac(int dacChannel, bool enabled)
         cerr << "Error in Rhd2000EvalBoard::enableDac: dacChannel out of range." << endl;
         return;
     }
-    set_wire_in<true>(dev.get(), WireInDacSource[dacChannel], (enabled ? 0x0800 : 0x0000), 0x0800);
+    dev->set_register_sync(WireInDacSource[dacChannel], (enabled ? 0x0800 : 0x0000), 0x0800);
 }
 
 // Set the gain level of all eight DAC channels to 2^gain (gain = 0-7).
@@ -873,7 +822,7 @@ void Rhd2000EvalBoard::selectDacDataStream(int dacChannel, int stream)
         cerr << "Error in Rhd2000EvalBoard::selectDacDataStream: stream out of range." << endl;
         return;
     }
-    set_wire_in<true>(dev.get(), WireInDacSource[dacChannel], stream << 5, 0x07e0);
+    dev->set_register_sync(WireInDacSource[dacChannel], stream << 5, 0x07e0);
 }
 
 // Assign a particular amplifier channel (0-31) to a DAC channel (0-7).
@@ -891,7 +840,7 @@ void Rhd2000EvalBoard::selectDacDataChannel(int dacChannel, int dataChannel)
              << endl;
         return;
     }
-    set_wire_in<true>(dev.get(), WireInDacSource[dacChannel], dataChannel << 0, 0x001f);
+    dev->set_register_sync(WireInDacSource[dacChannel], dataChannel << 0, 0x001f);
 }
 
 
@@ -913,9 +862,10 @@ void Rhd2000EvalBoard::config_dac(int channel, bool enable, int source_stream, i
     }
     // RHD [enable:1bit, stream:6bit, channel:5bit]
     // RHS [enable:1bit, stream:4bit, channel:5bit]
-    set_wire_in<true>(dev.get(), WireInDacSource[channel],
-                      (enable * (rhs ? 0x0200 : 0x0800)) | (source_stream << 5) | source_channel,
-                      rhs ? 0x3fff : 0xffff);
+    dev->set_register_sync(
+        WireInDacSource[channel],
+        (enable * (rhs ? 0x0200 : 0x0800)) | (source_stream << 5) | source_channel,
+        rhs ? 0x3fff : 0xffff);
 }
 
 // Enable external triggering of amplifier hardware 'fast settle' function (blanking).
@@ -952,11 +902,13 @@ void Rhd2000EvalBoard::enableExternalDigOut(SPIPort port, bool enable)
 {
     lock_guard<mutex> lockOk(okMutex);
     if (port == SPIPort::All) {
-        for (int i = 0; i < ports.num_of_spi; ++i)
-            send_trigger_in(dev.get(), TrigInDacConfig, 16 + i, WireInMultiUse, int(enable));
+        for (int i = 0; i < ports.num_of_spi; ++i) {
+            dev->set_register_sync(WireInMultiUse, (int) enable);
+            dev->trigger(TrigInDacConfig, 16 + i);
+        }
     } else {
-        send_trigger_in(dev.get(), TrigInDacConfig, 16 + static_cast<int>(port), WireInMultiUse,
-                        int(enable));
+        dev->set_register_sync(WireInMultiUse, (int) enable);
+        dev->trigger(TrigInDacConfig, 16 + static_cast<int>(port));
     }
 }
 
@@ -971,11 +923,13 @@ void Rhd2000EvalBoard::setExternalDigOutChannel(SPIPort port, int channel)
         return;
     }
     if (port == SPIPort::All) {
-        for (int i = 0; i < ports.num_of_spi; ++i)
-            send_trigger_in(dev.get(), TrigInDacConfig, 24 + i, WireInMultiUse, channel);
+        for (int i = 0; i < ports.num_of_spi; ++i) {
+            dev->set_register_sync(WireInMultiUse, channel);
+            dev->trigger(TrigInDacConfig, 24 + i);
+        }
     } else {
-        send_trigger_in(dev.get(), TrigInDacConfig, 24 + static_cast<int>(port), WireInMultiUse,
-                        channel);
+        dev->set_register_sync(WireInMultiUse, channel);
+        dev->trigger(TrigInDacConfig, 24 + static_cast<int>(port));
     }
 }
 
@@ -1108,11 +1062,7 @@ long Rhd2000EvalBoard::read_raw_samples(int samples, unsigned char *buffer)
     long result = dev->read(PipeOutData, samples * get_sample_size<char>(), buffer);
 
 
-    if (result < 0) {
-        cerr << "read data error\n";
-    } else {
-        cout << "read data success" << result << endl;
-    }
+    if (result < 0) cerr << "read data error" << result << endl;
 
     return result;
 }
