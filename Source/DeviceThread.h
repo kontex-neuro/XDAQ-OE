@@ -198,6 +198,8 @@ public:
     bool expander_present() const { return evalBoard->expander_present(); }
     bool set_dio32(bool enable) { return evalBoard->set_dio32(enable); }
 
+    std::string serial_number;
+    std::string xdaq_model_name;
 private:
     struct DataQueue;
     // clang-format off

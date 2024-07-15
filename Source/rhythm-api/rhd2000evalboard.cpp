@@ -1350,7 +1350,7 @@ vector<int> find_optimal_delays_greedy(
 
 const std::vector<IntanChip::Chip> &Rhd2000EvalBoard::scan_chips()
 {
-    if (true) {
+    if (false) {
         for (int i = 0; i < ports.max_streams; ++i) enableDataStream(i, true);
         for (int i = 0; i < ports.max_chips; ++i) {
             if (i != 8 && i != 9) {

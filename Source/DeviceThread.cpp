@@ -36,7 +36,6 @@
 #include <algorithm>
 #include <cassert>
 #include <chrono>
-#include <filesystem>
 #include <nlohmann/json.hpp>
 #include <ranges>
 
@@ -44,14 +43,15 @@
 #include "DeviceThread.h"
 #include "Headstage.h"
 #include "ImpedanceMeter.h"
+#include "UI/DeviceSelector.h"
 #include "rhythm-api/utils.h"
+
 
 
 using json = nlohmann::json;
 
 using namespace RhythmNode;
 using namespace std::string_literals;
-namespace fs = std::filesystem;
 
 // #define DEBUG_EMULATE_HEADSTAGES 8
 // #define DEBUG_EMULATE_64CH
@@ -215,158 +215,15 @@ Array<int> DeviceThread::getDACchannels() const
     return dacChannelsArray;
 }
 
-
 bool DeviceThread::openBoard(String pathToLibrary)
 {
-    struct info {
-        std::string plugin_path;
-        std::string plugin_display_name;
-        json device_config;
-        json device_info;
-    };
-    std::vector<info> device_options;
-    auto sharedDir =
-        fs::path(CoreServices::getSavedStateDirectory().getFullPathName().toStdString());
-    if (fs::exists(sharedDir / "shared"))
-        sharedDir = sharedDir / "shared";
-    else {
-        sharedDir = sharedDir / ("shared-api" + std::to_string(PLUGIN_API_VER));
-        if (!fs::exists(sharedDir)) throw std::runtime_error("Shared directory not found");
-    }
-
-    auto xdaq_dir = sharedDir / "xdaq";
-#if defined(_WIN32)
-    constexpr auto shared_extension = ".dll";
-    SetDllDirectoryA((xdaq_dir / "plugin").generic_string().c_str());
-#elif defined(__APPLE__)
-    constexpr auto shared_extension = ".dylib";
-#elif defined(__linux__)
-    constexpr auto shared_extension = ".so";
-#else
-    static_assert(false, "Unsupported platform");
-#endif
-    auto plugin_paths_range =
-        fs::directory_iterator(xdaq_dir / "plugin") |
-        std::views::filter([=](const fs::directory_entry &entry) {
-            fmt::print("Checking: {}\n", entry.path().generic_string());
-            if (fs::is_directory(entry)) return false;
-            // C++23: std::basic_string<CharT,Traits,Allocator>::contains
-            if (entry.path().filename().generic_string().find("device_plugin") == std::string::npos)
-                return false;
-            return entry.path().extension() == shared_extension;
-        }) |
-        std::views::transform([](auto ent) { return fs::canonical(fs::path(ent)); });
-    // C++23: std::ranges::to ref: https://stackoverflow.com/a/60971856
-    // | std::ranges::to<std::vector>();
-    std::vector<fs::path> plugin_paths;
-    for (auto path : plugin_paths_range) plugin_paths.push_back(path);
-    // remove duplicates
-    std::ranges::sort(plugin_paths);
-    plugin_paths.erase(std::unique(plugin_paths.begin(), plugin_paths.end()), plugin_paths.end());
-
-    for (auto &path : plugin_paths) {
-        fmt::print("Loading plugin: {}\n", path.generic_string());
-        auto plugin = xdaq::get_plugin(path);
-        auto plugin_info = json::parse(plugin->info());
-        fmt::print("Plugin: {}\n", plugin_info.dump(4));
-        for (auto &device_config : json::parse(plugin->list_devices())) {
-            device_config["mode"] = "rhd";
-            fmt::print("Device: {}\n", device_config.dump(4));
-            auto device = plugin->create_device(device_config.dump());
-            const auto info_str = device->get_info();
-            fmt::print("Info: {}\n", info_str.value_or("N/A"));
-            device_options.push_back({
-                .plugin_path = path.generic_string(),
-                .plugin_display_name = plugin_info["name"].get<std::string>(),
-                .device_config = device_config,
-                .device_info = info_str.has_value() ? json::parse(info_str.value())
-                                                    : json{{"Serial Number", "N/A"}},
-            });
-        }
-    }
-
-    class DeviceSelector : public Component, public TableListBoxModel, public Button::Listener
-    {
-    public:
-        DeviceSelector(std::vector<info> &options) : options(options)
-        {
-            table.getHeader().addColumn("Name", 1, 150);
-            table.getHeader().addColumn("Serial Number", 2, 300);
-            table.setColour(juce::ListBox::outlineColourId, juce::Colours::grey);
-            table.setOutlineThickness(1);
-            table.setBounds(10, 10, 452, 200);
-            addAndMakeVisible(table);
-            acceptButton.setBounds(196, 260, 80, 20);
-            acceptButton.addListener(this);
-            addAndMakeVisible(acceptButton);
-        }
-        ~DeviceSelector() override {}
-
-        int getNumRows() override { return options.size(); };
-
-        void paintCell(juce::Graphics &g, int rowNumber, int columnId, int width, int height,
-                       bool rowIsSelected) override
-        {
-            g.setColour(rowIsSelected ? juce::Colours::darkblue
-                                      : getLookAndFeel().findColour(juce::ListBox::textColourId));
-            const auto &d = options[rowNumber];
-            if (columnId == 1)
-                g.drawText(d.plugin_display_name, 2, 0, width - 4, height,
-                           juce::Justification::centredLeft, true);
-            else if (columnId == 2)
-                g.drawText(
-                    d.device_info.contains("Serial Number")
-                        ? fmt::format("{}", d.device_info["Serial Number"].get<std::string>())
-                        : "N/A",
-                    2, 0, width - 4, height, juce::Justification::centredLeft, true);
-
-            g.setColour(getLookAndFeel().findColour(juce::ListBox::backgroundColourId));
-            g.fillRect(width - 1, 0, 1, height);
-        }
-
-        void paintRowBackground(juce::Graphics &g, int rowNumber, int /*width*/, int /*height*/,
-                                bool rowIsSelected) override
-        {
-            auto alternateColour =
-                getLookAndFeel()
-                    .findColour(juce::ListBox::backgroundColourId)
-                    .interpolatedWith(getLookAndFeel().findColour(juce::ListBox::textColourId),
-                                      0.03f);
-            if (rowIsSelected)
-                g.fillAll(juce::Colours::lightblue);
-            else if (rowNumber % 2)
-                g.fillAll(alternateColour);
-        }
-
-        void buttonClicked(Button *button) override
-        {
-            if (table.getSelectedRow() == -1) {
-                AlertWindow::showMessageBox(AlertWindow::WarningIcon, "No device selected",
-                                            "Please select a device to launch", "OK");
-                return;
-            }
-            if (DialogWindow *dw = findParentComponentOfClass<DialogWindow>())
-                dw->exitModalState(table.getSelectedRow());
-        }
-
-        void cellDoubleClicked(int rowNumber, int columnId, const MouseEvent &) override
-        {
-            if (DialogWindow *dw = findParentComponentOfClass<DialogWindow>())
-                dw->exitModalState(rowNumber);
-        }
-
-    private:
-        TableListBox table{{}, this};
-        UtilityButton acceptButton{"LAUNCH", Font("Small Text", 13, Font::plain)};
-        std::vector<info> &options;
-    };
-
     // TODO: handle no devices, adding refresh button
     // TODO: handle only one device, auto-select
+    auto r = CoreServices::getDefaultUserSaveDirectory();
+    auto device_options = get_device_options();
     DialogWindow::LaunchOptions options;
     options.content.setOwned(new DeviceSelector(device_options));
-    // TODO: dynamic size
-    options.content->setSize(472, 300);
+    options.content->setSize(472, 260);
     options.dialogTitle = "Choose XDAQ";
     options.dialogBackgroundColour = Colours::darkgrey;
     options.escapeKeyTriggersCloseButton = true;
@@ -374,7 +231,8 @@ bool DeviceThread::openBoard(String pathToLibrary)
     options.resizable = false;
 
     int result = options.runModal();
-    const auto &selected_device = device_options[result];
+    if (result == 0 || result > device_options.size()) return false;
+    const auto &selected_device = device_options[result - 1];
     auto plugin = xdaq::get_plugin(selected_device.plugin_path);
     try {
         auto dev = plugin->create_device(selected_device.device_config.dump());
@@ -384,7 +242,8 @@ bool DeviceThread::openBoard(String pathToLibrary)
         AlertWindow::showMessageBox(AlertWindow::WarningIcon, "Error", e.what(), "OK");
         return false;
     }
-
+    serial_number = selected_device.device_info["Serial Number"].get<std::string>();
+    xdaq_model_name = selected_device.device_info["XDAQ Model"].get<std::string>();
     return true;
 }
 
