@@ -8,8 +8,7 @@ if (NOT DEFINED GUI_BASE_DIR)
 	endif()
 endif()
 
-get_filename_component(PROJECT_FOLDER ${CMAKE_CURRENT_SOURCE_DIR} ABSOLUTE)
-get_filename_component(PLUGIN_NAME ${PROJECT_FOLDER} NAME)
+set(PLUGIN_NAME XDAQ-OE)
 
 set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake
