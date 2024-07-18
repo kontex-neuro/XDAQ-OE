@@ -115,7 +115,7 @@ find_package(nlohmann_json REQUIRED)
 
 target_link_libraries(${PLUGIN_NAME} PRIVATE
 	fmt::fmt
-	xdaq::xdaq
+	xdaq::xdaq_device
 	nlohmann_json::nlohmann_json
 )
 

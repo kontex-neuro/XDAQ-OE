@@ -7,7 +7,7 @@ class libxdaq(ConanFile):
     generators = "CMakeDeps", "VirtualRunEnv"
 
     def requirements(self):
-        self.requires("boost/1.85.0")
+        self.requires("boost/1.81.0")
         self.requires("zlib/1.3.1")
         self.requires("fmt/10.2.1")
         self.requires("nlohmann_json/3.10.5")
