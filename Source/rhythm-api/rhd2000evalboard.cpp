@@ -1339,10 +1339,10 @@ const std::vector<IntanChip::Chip> &Rhd2000EvalBoard::scan_chips()
         const auto spi = static_cast<Rhd2000EvalBoard::SPIPort>(port_idx++);
         setCableDelay(spi, max_delay);
     }
-    std::vector<int> led;
-    for (auto s = optimal_delays.begin(); s != optimal_delays.end();
-         s += ports.max_non_ddr_streams_per_port) {
-        led.push_back(*std::max_element(s, s + ports.max_non_ddr_streams_per_port) > 0);
+    std::vector<int> led(8, 0);
+    for (int i = 0; i < ports.num_of_ports; ++i) {
+        auto s = optimal_delays.begin() + i * ports.max_non_ddr_streams_per_port;
+        led[i] = *std::max_element(s, s + ports.max_non_ddr_streams_per_port) > 0;
     }
     setSpiLedDisplay(&led[0]);
 

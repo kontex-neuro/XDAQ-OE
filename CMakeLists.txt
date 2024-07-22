@@ -73,7 +73,7 @@ if (NOT CMAKE_LIBRARY_ARCHITECTURE)
 endif()
 
 # target_compile_options(${PLUGIN_NAME} PRIVATE $<$<CONFIG:Debug>:-fsanitize=address>)
-# target_link_libraries(${PLUGIN_NAME} $<$<CONFIG:Debug>:-fsanitize=address>)
+# target_link_libraries(${PLUGIN_NAME} PRIVATE $<$<CONFIG:Debug>:-fsanitize=address>)
 
 #Libraries and compiler options
 if(MSVC)
