@@ -253,10 +253,10 @@ void DeviceThread::initializeBoard()
     String bitfilename;
 
     File sharedDir = CoreServices::getSavedStateDirectory();
-	if(!sharedDir.getFullPathName().contains("plugin-GUI" + File::getSeparatorString() + "Build"))
-		sharedDir = sharedDir.getChildFile("shared-api" + String(PLUGIN_API_VER));
-	else
-		sharedDir = sharedDir.getChildFile("shared");
+    if (!sharedDir.getFullPathName().contains("plugin-GUI" + File::getSeparatorString() + "Build"))
+        sharedDir = sharedDir.getChildFile("shared-api" + String(PLUGIN_API_VER));
+    else
+        sharedDir = sharedDir.getChildFile("shared");
 
     bitfilename = sharedDir.getFullPathName() + File::getSeparatorString() + "xdaq.bit";
 
@@ -993,6 +993,7 @@ bool DeviceThread::startAcquisition()
     auto data_queue = new DataQueue();
 
     startThread();
+    isTransmitting = true;
     auto process_thread = std::thread([data_queue, this]() {
         const int chunk_size = 1;
         int buffer_samples;
@@ -1016,7 +1017,7 @@ bool DeviceThread::startAcquisition()
              +settings.acquireAdc * evalBoard->ports.num_of_adc);
 
         auto output_buffer = std::vector<float>(current_aquisition_channels * 1);
-        while (isThreadRunning()) {
+        while (isTransmitting) {
             if (data_queue->maybe_empty()) {
                 std::this_thread::sleep_for(std::chrono::microseconds(500));
                 continue;
@@ -1080,7 +1081,7 @@ bool DeviceThread::startAcquisition()
         0xa0, [data_queue, this](auto raw_data, std::size_t length) {
             // TODO: need to handle the case where the queue is full
             if (data_queue->approximate_size() > 10) {
-                fmt::print("Queue {}\n", data_queue->approximate_size());
+                // fmt::print("Queue {}\n", data_queue->approximate_size());
             }
             if (data_queue->maybe_full()) {
                 LOGE("System is too slow to keep up with data acquisition, dropping data");
@@ -1127,6 +1128,11 @@ bool DeviceThread::startAcquisition()
                      TTL_OUTPUT_STATE[2], TTL_OUTPUT_STATE[3], TTL_OUTPUT_STATE[4],
                      TTL_OUTPUT_STATE[5], TTL_OUTPUT_STATE[6], TTL_OUTPUT_STATE[7]);
             }
+
+            if (!isTransmitting) {
+                evalBoard->setMaxTimeStep(0);
+                evalBoard->setContinuousRunMode(false);
+            }
         });
 
     if (!new_stream) {
@@ -1138,17 +1144,17 @@ bool DeviceThread::startAcquisition()
                    std::move(new_stream.value())},
                std::unique_ptr<DataQueue>(data_queue), std::move(process_thread)}};
 
-    isTransmitting = true;
 
     return true;
 }
 
 bool DeviceThread::stopAcquisition()
 {
-    // LOGD("RHD2000 data thread stopping acquisition.");
+    LOGD("RHD2000 data thread stopping acquisition.");
     if (isThreadRunning()) {
         signalThreadShouldExit();
     }
+    isTransmitting = false;
     if (stream) {
         auto &[s, q, t] = stream.value();
         s->stop();
@@ -1159,21 +1165,14 @@ bool DeviceThread::stopAcquisition()
 
 
     if (waitForThreadToExit(500)) {
-        // LOGD("RHD2000 data thread exited.");
+        LOGD("RHD2000 data thread exited.");
     } else {
-        // LOGD("RHD2000 data thread failed to exit, continuing anyway...");
+        LOGD("RHD2000 data thread failed to exit, continuing anyway...");
     }
 
-    if (deviceFound) {
-        evalBoard->setContinuousRunMode(false);
-        evalBoard->setMaxTimeStep(0);
-        LOGD("Flushing FIFO.");
-        evalBoard->flush();
-    }
 
     sourceBuffers[0]->clear();
 
-    isTransmitting = false;
     updateSettingsDuringAcquisition = false;
 
     // remove timers
