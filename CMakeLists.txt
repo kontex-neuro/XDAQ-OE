@@ -72,6 +72,35 @@ if (NOT CMAKE_LIBRARY_ARCHITECTURE)
 	endif()
 endif()
 
+option(INSTALL_TO_SYSTEM "Install to system instead of plugin-GUI build folder" OFF)
+
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+	if(INSTALL_TO_SYSTEM)
+		if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
+			set_property(CACHE CMAKE_INSTALL_PREFIX PROPERTY VALUE C:/ProgramData/Open\ Ephys)
+		elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
+			set_property(CACHE CMAKE_INSTALL_PREFIX PROPERTY VALUE $ENV{HOME}/Library/Application\ Support/open-ephys)
+		elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+			message(FATAL_ERROR "Not implemented")
+		endif()
+	else()
+		set_property(CACHE CMAKE_INSTALL_PREFIX PROPERTY VALUE ${GUI_BASE_DIR}/Build)
+		if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
+		elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
+			message(FATAL_ERROR "Only system install is supported on Mac")
+		elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+		endif()
+	endif()
+endif()
+
+if(INSTALL_TO_SYSTEM)
+	set(PLUGIN_INSTALL_DIR plugins-api8)
+	set(SHARED_INSTALL_DIR shared-api8)
+else()
+	set(PLUGIN_INSTALL_DIR ${CONFIGURATION_FOLDER}/plugins)
+	set(SHARED_INSTALL_DIR ${CONFIGURATION_FOLDER}/shared-api8)
+endif()
+
 # target_compile_options(${PLUGIN_NAME} PRIVATE $<$<CONFIG:Debug>:-fsanitize=address>)
 # target_link_libraries(${PLUGIN_NAME} PRIVATE $<$<CONFIG:Debug>:-fsanitize=address>)
 
@@ -80,24 +109,19 @@ if(MSVC)
 	target_compile_definitions(${PLUGIN_NAME} PRIVATE NOMINMAX)
 	target_link_libraries(${PLUGIN_NAME} PRIVATE ${GUI_BIN_DIR}/open-ephys.lib)
 	target_compile_options(${PLUGIN_NAME} PRIVATE /sdl- /W0)
-	
-	install(TARGETS ${PLUGIN_NAME} RUNTIME DESTINATION ${GUI_BIN_DIR}/plugins  CONFIGURATIONS ${CMAKE_CONFIGURATION_TYPES})
-
 elseif(LINUX)
 	target_link_libraries(${PLUGIN_NAME} GL X11 Xext Xinerama asound dl freetype pthread rt)
 	set_property(TARGET ${PLUGIN_NAME} APPEND_STRING PROPERTY LINK_FLAGS
 		"-fvisibility=hidden -fPIC -rdynamic -Wl,-rpath='$ORIGIN/../shared' -Wl,-rpath='$ORIGIN/../shared-api8'")
 	target_compile_options(${PLUGIN_NAME} PRIVATE -fPIC -rdynamic)
 	target_compile_options(${PLUGIN_NAME} PRIVATE -O3) #enable optimization for linux debug
-	
-	install(TARGETS ${PLUGIN_NAME} LIBRARY DESTINATION ${GUI_BIN_DIR}/plugins)
 elseif(APPLE)
 	set_target_properties(${PLUGIN_NAME} PROPERTIES BUNDLE TRUE)
 	set_property(TARGET ${PLUGIN_NAME} APPEND_STRING PROPERTY LINK_FLAGS
 	"-undefined dynamic_lookup -rpath @loader_path/../../../../shared-api8")
-
-	install(TARGETS ${PLUGIN_NAME} DESTINATION $ENV{HOME}/Library/Application\ Support/open-ephys/plugins-api8)
 endif()
+
+install(TARGETS ${PLUGIN_NAME} DESTINATION ${PLUGIN_INSTALL_DIR})
 
 #create filters for vs and xcode
 
@@ -119,19 +143,23 @@ target_link_libraries(${PLUGIN_NAME} PRIVATE
 	nlohmann_json::nlohmann_json
 )
 
+list(GET XDAQ_PLUGIN_TARGETS 0 first_xdaq_plugin)
+
+install(DIRECTORY $<TARGET_FILE_DIR:xdaq::${first_xdaq_plugin}> DESTINATION ${SHARED_INSTALL_DIR}/xdaq)
+install(DIRECTORY ${XDAQ_RESOURCES_DIR} DESTINATION ${SHARED_INSTALL_DIR}/xdaq)
+
 if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
-	list(GET XDAQ_PLUGIN_TARGETS 0 first_xdaq_plugin)
-	install(DIRECTORY $<TARGET_FILE_DIR:xdaq::${first_xdaq_plugin}>
-		DESTINATION ${GUI_BIN_DIR}/shared/xdaq
-	)
-	install(DIRECTORY ${XDAQ_RESOURCES_DIR} DESTINATION ${GUI_BIN_DIR}/shared/xdaq)
-elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
-elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
-	list(GET XDAQ_PLUGIN_TARGETS 0 first_xdaq_plugin)
-	install(DIRECTORY $<TARGET_FILE_DIR:xdaq::${first_xdaq_plugin}>
-		DESTINATION $ENV{HOME}/Library/Application\ Support/open-ephys/shared-api8/xdaq
-	)
-	install(DIRECTORY ${XDAQ_RESOURCES_DIR}
-		DESTINATION $ENV{HOME}/Library/Application\ Support/open-ephys/shared-api8/xdaq
-	)
+
+	set(CPACK_PACKAGE_NAME ${PLUGIN_NAME})
+
+	set(CPACK_NSIS_DISPLAY_NAME ${PLUGIN_NAME})
+	set(CPACK_NSIS_IGNORE_LICENSE_PAGE ON)
+	set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+	set(CPACK_NSIS_UNINSTALL_NAME "Uninstall ${PLUGIN_NAME}")
+	set(CPACK_PACKAGE_VENDOR "KonteX Neuroscience")
+	string(REPLACE "/" "\\\\" CPACK_NSIS_INSTALL_ROOT ${CMAKE_INSTALL_PREFIX})
+	set(CPACK_PACKAGE_INSTALL_DIRECTORY "")
+
+	include(CPACK)
+
 endif()
