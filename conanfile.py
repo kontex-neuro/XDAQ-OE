@@ -1,5 +1,5 @@
 from conan import ConanFile
-from conan.tools.cmake import CMakeToolchain
+from conan.tools.cmake import CMakeToolchain, cmake_layout
 
 
 class libxdaq(ConanFile):
@@ -7,17 +7,14 @@ class libxdaq(ConanFile):
     generators = "CMakeDeps", "VirtualRunEnv"
 
     def requirements(self):
-        self.requires("boost/1.81.0")
-        self.requires("zlib/1.3.1")
         self.requires("fmt/10.2.1")
         self.requires("nlohmann_json/3.11.3")
         self.requires("spdlog/1.13.0")
-
-    def configure(self):
-        self.options["boost/*"].with_stacktrace_backtrace = False
-        self.options["boost/*"].without_locale = True
-        self.options["boost/*"].without_stacktrace = True
+        self.requires("libxdaq/0.1.0")
 
     def generate(self):
         tc = CMakeToolchain(self)
         tc.generate()
+    
+    def layout(self):
+        cmake_layout(self)
