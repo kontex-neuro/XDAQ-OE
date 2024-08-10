@@ -21,7 +21,7 @@
 #include "rhd2000evalboard.h"
 
 #include <fmt/format.h>
-#include <xdaq/device_plugin.h>
+#include <xdaq/device_manager.h>
 
 #include <array>
 #include <chrono>
@@ -193,7 +193,7 @@ Rhd2000EvalBoard::~Rhd2000EvalBoard()
 
 // Find an Opal Kelly XEM6310-LX45 board attached to a USB port and open it.
 // Returns 1 if successful, -1 if FrontPanel cannot be loaded, and -2 if XEM6310 can't be found.
-int Rhd2000EvalBoard::open(xdaq::DevicePlugin::PluginOwnedDevice dev)
+int Rhd2000EvalBoard::open(xdaq::DeviceManager::OwnedDevice dev)
 {
     this->dev = std::move(dev);
     expander = true;

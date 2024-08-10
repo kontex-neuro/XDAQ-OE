@@ -143,9 +143,7 @@ target_link_libraries(${PLUGIN_NAME} PRIVATE
 	nlohmann_json::nlohmann_json
 )
 
-list(GET XDAQ_PLUGIN_TARGETS 0 first_xdaq_plugin)
-
-install(DIRECTORY $<TARGET_FILE_DIR:xdaq::${first_xdaq_plugin}> DESTINATION ${SHARED_INSTALL_DIR}/xdaq)
+install(DIRECTORY ${XDAQ_DEVICE_MANAGER_DIR} DESTINATION ${SHARED_INSTALL_DIR}/xdaq)
 install(DIRECTORY ${XDAQ_RESOURCES_DIR} DESTINATION ${SHARED_INSTALL_DIR}/xdaq)
 
 if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")

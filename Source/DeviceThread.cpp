@@ -233,9 +233,9 @@ bool DeviceThread::openBoard(String pathToLibrary)
     int result = options.runModal();
     if (result == 0 || result > device_options.size()) return false;
     const auto &selected_device = device_options[result - 1];
-    auto plugin = xdaq::get_plugin(selected_device.plugin_path);
     try {
-        auto dev = plugin->create_device(selected_device.device_config.dump());
+        auto device_manager = xdaq::get_device_manager(selected_device.device_manager_path);
+        auto dev = device_manager->create_device(selected_device.device_config.dump());
         // TODO: update api
         int return_code = evalBoard->open(std::move(dev));
     } catch (const std::exception &e) {
@@ -1140,7 +1140,7 @@ bool DeviceThread::startAcquisition()
         return false;
     }
 
-    stream = {{std::unique_ptr<xdaq::DevicePlugin::PluginOwnedDevice::element_type::DataStream>{
+    stream = {{std::unique_ptr<xdaq::DeviceManager::OwnedDevice::element_type::DataStream>{
                    std::move(new_stream.value())},
                std::unique_ptr<DataQueue>(data_queue), std::move(process_thread)}};
 

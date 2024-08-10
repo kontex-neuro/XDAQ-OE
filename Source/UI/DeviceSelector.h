@@ -7,8 +7,8 @@
 using json = nlohmann::json;
 
 struct info {
-    std::string plugin_path;
-    std::string plugin_display_name;
+    std::string device_manager_path;
+    std::string display_name;
     json device_config;
     json device_info;
 };

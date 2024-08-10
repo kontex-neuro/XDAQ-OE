@@ -36,7 +36,7 @@
 
 #define MAX_DIO 32
 
-#include <xdaq/device_plugin.h>
+#include <xdaq/device_manager.h>
 
 #include <chrono>
 #include <cstdint>
@@ -64,7 +64,7 @@ public:
     }
 
 
-    int open(xdaq::DevicePlugin::PluginOwnedDevice dev);
+    int open(xdaq::DeviceManager::OwnedDevice dev);
     void initialize();
 
     // int FPGA_board;
@@ -226,7 +226,7 @@ public:
         return estimateCableLengthMeters(cableDelay[static_cast<int>(port)]);
     }
 
-    xdaq::DevicePlugin::PluginOwnedDevice dev;
+    xdaq::DeviceManager::OwnedDevice dev;
 private:
     const int samples_per_block = SAMPLES_PER_DATA_BLOCK;
     long read_raw_samples(int samples, unsigned char *buffer);

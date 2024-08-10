@@ -23,7 +23,7 @@
 
 #pragma once
 #include <DataThreadHeaders.h>
-#include <xdaq/device_plugin.h>
+#include <xdaq/device_manager.h>
 
 #include <array>
 #include <atomic>
@@ -205,7 +205,7 @@ private:
     // clang-format off
     std::optional<
         std::tuple<
-            std::unique_ptr<xdaq::DevicePlugin::PluginOwnedDevice::element_type::DataStream>,
+            std::unique_ptr<xdaq::DeviceManager::OwnedDevice::element_type::DataStream>,
             std::unique_ptr<DataQueue>,
             std::thread
         >
