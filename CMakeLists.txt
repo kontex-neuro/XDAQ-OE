@@ -17,7 +17,8 @@ set(CMAKE_MODULE_PATH
 
 set(CMAKE_OSX_ARCHITECTURES "x86_64" CACHE STRING "Build architecture for Mac OS X" FORCE)
 
-project(OE_PLUGIN_${PLUGIN_NAME})
+project(OE_PLUGIN_${PLUGIN_NAME} VERSION 0.2.0 LANGUAGES CXX)
+
 set(CMAKE_SHARED_LIBRARY_PREFIX "")
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
 	set(LINUX 1)
@@ -53,6 +54,12 @@ if (APPLE)
 else()
 	add_library(${PLUGIN_NAME} SHARED ${SRC_FILES})
 endif()
+
+target_compile_definitions(${PLUGIN_NAME} PRIVATE
+	PLUGIN_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+	PLUGIN_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+	PLUGIN_VERSION_PATCH=${PROJECT_VERSION_PATCH}
+)
 
 target_compile_features(${PLUGIN_NAME} PUBLIC cxx_auto_type cxx_generalized_initializers)
 
