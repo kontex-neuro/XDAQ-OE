@@ -116,7 +116,7 @@ std::unique_ptr<GenericEditor> DeviceThread::createEditor(SourceNode *sn)
     return editor;
 }
 
-void DeviceThread::handleBroadcastMessage(String msg)
+void DeviceThread::handleBroadcastMessage (const String& msg, const int64 messageTimeMilliseconds)
 {
     StringArray parts = StringArray::fromTokens(msg, " ", "");
 
@@ -1154,8 +1154,11 @@ bool DeviceThread::updateBuffer()
             //                                    .count());
             // start_time = Clock::now();
 
+            //TODO: Update
+            /*
             sourceBuffers[0]->addToBuffer(&output_buffer[0], &current_block->timeStamp[0], &ts[0],
                                           &ttl[0], num_samples, num_samples);
+            */
 
             // if (chunk == (SAMPLES_PER_DATA_BLOCK * 4 / current_block->num_samples - 1))
             //     fmt::print(

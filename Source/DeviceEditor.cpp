@@ -58,7 +58,7 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     }
 
     // add rescan button
-    rescanButton = new UtilityButton("RESCAN", Font("Small Text", 13, Font::plain));
+    rescanButton = new UtilityButton("RESCAN");
     rescanButton->setRadius(3.0f);
     rescanButton->setBounds(6, 108, 65, 18);
     rescanButton->addListener(this);
@@ -77,7 +77,7 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     bandwidthInterface->setBounds(grid_col1, 55, 80, 50);
 
     // add AUX channel enable/disable button
-    auxButton = new UtilityButton("AUX", Font("Small Text", 13, Font::plain));
+    auxButton = new UtilityButton("AUX");
     auxButton->setRadius(3.0f);
     auxButton->setBounds(grid_col1, 108, 32, 18);
     auxButton->addListener(this);
@@ -86,7 +86,7 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     addAndMakeVisible(auxButton);
 
     // add ADC channel enable/disable button
-    adcButton = new UtilityButton("ADC", Font("Small Text", 13, Font::plain));
+    adcButton = new UtilityButton("ADC");
     adcButton->setRadius(3.0f);
     adcButton->setBounds(grid_col1 + 32 + 1, 108, 32, 18);
     adcButton->addListener(this);
@@ -131,7 +131,7 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     // clockInterface->setBounds(grid_col2, 80, 70, 50);
 
     // add DSP Offset Button
-    dspoffsetButton = new UtilityButton("DSP:", Font("Small Text", 13, Font::plain));
+    dspoffsetButton = new UtilityButton("DSP:");
     dspoffsetButton->setRadius(3.0f);  // sets the radius of the button's corners
     // sets the x position, y position, width, and height of the button
     dspoffsetButton->setBounds(grid_col2, 108, 32, 18);
@@ -149,7 +149,7 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     dspInterface->setBounds(grid_col2 + 32, 108, 40, 50);
 
     const auto grid_col3 = 180 + port_layout_width;
-    dacTTLButton = new UtilityButton("DAC TTL", Font("Small Text", 13, Font::plain));
+    dacTTLButton = new UtilityButton("DAC TTL");
     dacTTLButton->setRadius(3.0f);
     dacTTLButton->setBounds(grid_col3, 25, 60, 18);
     dacTTLButton->addListener(this);
@@ -193,7 +193,7 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
 
     if (board->expander_present()) {
         dio32_button =
-            std::make_unique<UtilityButton>("DIO32", Font("Small Text", 13, Font::plain));
+            std::make_unique<UtilityButton>("DIO32");
         dio32_button->setRadius(3.0f);
         dio32_button->setBounds(grid_col3, 108, 32, 18);
         dio32_button->addListener(this);
@@ -246,6 +246,7 @@ void DeviceEditor::comboBoxChanged(ComboBox *comboBox)
     }
 }
 
+/*
 void DeviceEditor::channelStateChanged(Array<int> newChannels)
 {
     int selectedChannel = -1;
@@ -265,7 +266,7 @@ void DeviceEditor::channelStateChanged(Array<int> newChannels)
         electrodeButtons[int(activeAudioChannel)]->setToggleState(false, dontSendNotification);
     }
 }
-
+*/
 
 void DeviceEditor::buttonClicked(Button *button)
 {
@@ -291,6 +292,7 @@ void DeviceEditor::buttonClicked(Button *button)
                 channelStates.push_back(false);
         }
 
+        /*TODO: Update
         auto *channelSelector = new PopupChannelSelector(this, channelStates);
 
         channelSelector->setChannelButtonColour(Colour(0, 174, 239));
@@ -298,6 +300,7 @@ void DeviceEditor::buttonClicked(Button *button)
 
         CallOutBox &myBox = CallOutBox::launchAsynchronously(
             std::unique_ptr<Component>(channelSelector), button->getScreenBounds(), nullptr);
+        */
     } else if (button == auxButton && !acquisitionIsActive) {
         board->enableAuxs(button->getToggleState());
         LOGD("AUX Button toggled");
@@ -637,7 +640,7 @@ HeadstageOptionsInterface::HeadstageOptionsInterface(DeviceThread *board_, Devic
     for (int chip = 0; chip < max_chips_per_port; ++chip) {
         headstage_ids.push_back(port_idx * max_chips_per_port + chip);
         hsButtons.push_back(
-            std::make_unique<UtilityButton>(" ", Font("Small Text", 13, Font::plain)));
+            std::make_unique<UtilityButton>(" "));
         hsButtons.back()->setRadius(3.0f);
         hsButtons.back()->setBounds(23 + 20 * chip, 1, 20, 17);
         hsButtons.back()->setEnabledState(false);

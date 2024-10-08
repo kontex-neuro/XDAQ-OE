@@ -104,7 +104,7 @@ public:
     ChannelNamingScheme getNamingScheme();
 
     /** Allow the thread to respond to messages sent by other plugins */
-    void handleBroadcastMessage(String msg) override;
+    void handleBroadcastMessage (const String& msg, const int64 messageTimeMilliseconds) override;
 
     /** Informs the DataThread about whether to expect saved settings to be loaded*/
     void initialize(bool signalChainIsLoading) override;

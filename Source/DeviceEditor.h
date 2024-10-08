@@ -42,8 +42,7 @@ struct ImpedanceData;
 
 class DeviceEditor : public VisualizerEditor,
                      public ComboBox::Listener,
-                     public Button::Listener,
-                     public PopupChannelSelector::Listener
+                     public Button::Listener
 
 {
 public:
@@ -84,7 +83,7 @@ public:
     Visualizer *createNewCanvas(void) override;
 
     /** Called by PopupChannelSelector */
-    void channelStateChanged(Array<int> newChannels) override;
+    //void channelStateChanged(Array<int> newChannels) override;
 
 private:
     OwnedArray<HeadstageOptionsInterface> headstageOptionsInterfaces;
