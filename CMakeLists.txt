@@ -98,6 +98,11 @@ elseif(APPLE)
     install_name_tool -change "@loader_path/../Frameworks/libokFrontPanel.dylib" 
 	"@rpath/libokFrontPanel.dylib" $<TARGET_FILE:${PLUGIN_NAME}>)
 
+	set_target_properties(${PLUGIN_NAME} PROPERTIES
+		XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
+		XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED NO
+	)
+
 	install(TARGETS ${PLUGIN_NAME} DESTINATION $ENV{HOME}/Library/Application\ Support/open-ephys/plugins-api9)
 endif()
 
