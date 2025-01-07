@@ -200,17 +200,10 @@ public:
 
     std::string serial_number;
     std::string xdaq_model_name;
+
 private:
-    struct DataQueue;
-    // clang-format off
-    std::optional<
-        std::tuple<
-            std::unique_ptr<xdaq::DeviceManager::OwnedDevice::element_type::DataStream>,
-            std::unique_ptr<DataQueue>,
-            std::thread
-        >
-    > stream;
-    // clang-format on
+    std::optional<std::unique_ptr<xdaq::DeviceManager::OwnedDevice::element_type::DataStream>>
+        stream;
 
     std::queue<DigitalOutputCommand> digitalOutputCommands;
 

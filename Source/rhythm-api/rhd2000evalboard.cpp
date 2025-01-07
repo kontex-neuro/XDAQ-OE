@@ -1050,6 +1050,9 @@ void Rhd2000EvalBoard::flush()
     // override pipeout block throttle
     // read all data from fifo
     // reset pipeout block throttle
+    unsigned char buffer[4096];
+    while(auto r = dev->read(0xA0, 4096, buffer)){
+    }
 
     dev->set_register_sync(WireInResetRun, 1 << 17, 1 << 17);
     dev->set_register_sync(WireInResetRun, 0 << 17, 1 << 17);

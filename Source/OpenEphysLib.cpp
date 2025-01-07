@@ -37,14 +37,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 using namespace Plugin;
 #define NUM_PLUGINS 1
 
+
 extern "C" EXPORT void getLibInfo(Plugin::LibraryInfo *info)
 {
+    const static auto version =
+        (std::to_string(PLUGIN_VERSION_MAJOR) + "." + std::to_string(PLUGIN_VERSION_MINOR) + "." +
+         std::to_string(PLUGIN_VERSION_PATCH));
     info->apiVersion = PLUGIN_API_VER;
     info->name = "XDAQ";
-    info->libVersion =
-        (std::to_string(PLUGIN_VERSION_MAJOR) + "." + std::to_string(PLUGIN_VERSION_MINOR) + "." +
-         std::to_string(PLUGIN_VERSION_PATCH))
-            .c_str();
+    info->libVersion = version.c_str();
     info->numPlugins = NUM_PLUGINS;
 }
 

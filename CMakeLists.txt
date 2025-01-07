@@ -106,7 +106,7 @@ if(INSTALL_TO_SYSTEM)
 	set(SHARED_INSTALL_DIR shared-api8)
 else()
 	set(PLUGIN_INSTALL_DIR ${CONFIGURATION_FOLDER}/plugins)
-	set(SHARED_INSTALL_DIR ${CONFIGURATION_FOLDER}/shared-api8)
+	set(SHARED_INSTALL_DIR ${CONFIGURATION_FOLDER}/shared)
 endif()
 
 # target_compile_options(${PLUGIN_NAME} PRIVATE $<$<CONFIG:Debug>:-fsanitize=address>)
@@ -129,7 +129,10 @@ elseif(APPLE)
 	"-undefined dynamic_lookup -rpath @loader_path/../../../../shared-api8")
 endif()
 
-install(TARGETS ${PLUGIN_NAME} DESTINATION ${PLUGIN_INSTALL_DIR})
+install(TARGETS ${PLUGIN_NAME}
+	LIBRARY DESTINATION ${PLUGIN_INSTALL_DIR}
+    RUNTIME DESTINATION ${PLUGIN_INSTALL_DIR}
+)
 
 #create filters for vs and xcode
 
