@@ -189,19 +189,6 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     }
     ttlSettleCombo->setSelectedId(1, sendNotification);
     addAndMakeVisible(ttlSettleCombo);
-
-
-    if (board->expander_present()) {
-        dio32_button =
-            std::make_unique<UtilityButton>("DIO32", Font("Small Text", 13, Font::plain));
-        dio32_button->setRadius(3.0f);
-        dio32_button->setBounds(grid_col3, 108, 32, 18);
-        dio32_button->addListener(this);
-        dio32_button->setClickingTogglesState(true);
-        dio32_button->setTooltip("Enable All 32 TTL Channels");
-        dio32_button->setToggleState(false, dontSendNotification);
-        addAndMakeVisible(dio32_button.get());
-    }
 }
 
 
@@ -312,14 +299,12 @@ void DeviceEditor::buttonClicked(Button *button)
     } else if (button == dspoffsetButton && !acquisitionIsActive) {
         LOGD("DSP offset ", button->getToggleState());
         board->setDSPOffset(button->getToggleState());
-    } else if (button == dio32_button.get()) {
-        board->set_dio32(button->getToggleState());
-        LOGD("DIO32 button", button->getToggleState());
     }
 }
 
 void DeviceEditor::startAcquisition()
 {
+    sampleRateInterface->setEnabled(false);
     rescanButton->setEnabledState(false);
     auxButton->setEnabledState(false);
     adcButton->setEnabledState(false);
@@ -333,6 +318,7 @@ void DeviceEditor::startAcquisition()
 
 void DeviceEditor::stopAcquisition()
 {
+    sampleRateInterface->setEnabled(true);
     rescanButton->setEnabledState(true);
     auxButton->setEnabledState(true);
     adcButton->setEnabledState(true);
