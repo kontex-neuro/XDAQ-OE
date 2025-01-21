@@ -63,7 +63,7 @@ target_compile_definitions(${PLUGIN_NAME} PRIVATE
 )
 
 target_compile_features(${PLUGIN_NAME} PUBLIC cxx_auto_type cxx_generalized_initializers)
-
+target_compile_options(${PLUGIN_NAME} PRIVATE $<$<PLATFORM_ID:Darwin>:-fexperimental-library>)
 target_compile_options(${PLUGIN_NAME} PRIVATE $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-Wno-deprecated-declarations>)
 target_compile_options(${PLUGIN_NAME} PRIVATE $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-Wno-deprecated>)
 

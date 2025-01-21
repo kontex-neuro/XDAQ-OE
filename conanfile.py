@@ -10,7 +10,7 @@ class libxdaq(ConanFile):
         self.requires("fmt/10.2.1")
         self.requires("nlohmann_json/3.11.3")
         self.requires("spdlog/1.13.0")
-        self.requires("libxdaq/0.2.1")
+        self.requires("libxdaq/0.2.2")
 
     def generate(self):
         tc = CMakeToolchain(self)
