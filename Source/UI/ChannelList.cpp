@@ -41,7 +41,6 @@ ChannelList::ChannelList(DeviceThread *board_, DeviceEditor *editor_)
     numberingSchemeLabel = new Label("Channel Names:", "Channel Names:");
     numberingSchemeLabel->setEditable(false);
     numberingSchemeLabel->setBounds(10, 10, 150, 25);
-    numberingSchemeLabel->setColour(Label::textColourId, juce::Colours::white);
     addAndMakeVisible(numberingSchemeLabel);
 
     numberingScheme = new ComboBox("numberingScheme");

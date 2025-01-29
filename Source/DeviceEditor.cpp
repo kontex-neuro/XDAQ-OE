@@ -99,7 +99,6 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     audioLabel = new Label("audio label", "Audio out");
     audioLabel->setBounds(grid_col2, 20, 75, 15);
     audioLabel->setFont(Font("Small Text", 10, Font::plain));
-    audioLabel->setColour(Label::textColourId, Colours::darkgrey);
     addAndMakeVisible(audioLabel);
 
     for (int i = 0; i < 2; i++) {
@@ -160,7 +159,6 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     dacHPFlabel = new Label("DAC HPF", "DAC HPF");
     dacHPFlabel->setFont(Font("Small Text", 10, Font::plain));
     dacHPFlabel->setBounds(grid_col3, 40, 60, 20);
-    dacHPFlabel->setColour(Label::textColourId, Colours::darkgrey);
     addAndMakeVisible(dacHPFlabel);
 
     dacHPFcombo = new ComboBox("dacHPFCombo");
@@ -177,7 +175,6 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     ttlSettleLabel = new Label("TTL Settle", "TTL Settle");
     ttlSettleLabel->setFont(Font("Small Text", 10, Font::plain));
     ttlSettleLabel->setBounds(grid_col3, 70, 70, 20);
-    ttlSettleLabel->setColour(Label::textColourId, Colours::darkgrey);
     addAndMakeVisible(ttlSettleLabel);
 
     ttlSettleCombo = new ComboBox("FastSettleComboBox");
@@ -468,14 +465,12 @@ BandwidthInterface::BandwidthInterface(DeviceThread *board_, DeviceEditor *edito
     upperBandwidthSelection->setEditable(true, false, false);
     upperBandwidthSelection->addListener(this);
     upperBandwidthSelection->setBounds(30, 25, 60, 20);
-    upperBandwidthSelection->setColour(Label::textColourId, Colours::darkgrey);
     addAndMakeVisible(upperBandwidthSelection);
 
     lowerBandwidthSelection = new Label("LowerBandwidth", lastLowCutString);
     lowerBandwidthSelection->setEditable(true, false, false);
     lowerBandwidthSelection->addListener(this);
     lowerBandwidthSelection->setBounds(30, 10, 60, 20);
-    lowerBandwidthSelection->setColour(Label::textColourId, Colours::darkgrey);
 
     addAndMakeVisible(lowerBandwidthSelection);
 }
@@ -554,10 +549,8 @@ double BandwidthInterface::getUpperBandwidth() { return actualUpperBandwidth; }
 
 void BandwidthInterface::paint(Graphics &g)
 {
-    g.setColour(Colours::darkgrey);
-
-    g.setFont(Font("Small Text", 10, Font::plain));
-
+    //g.setFont(Font("Small Text", 10, Font::plain));
+    g.setColour (findColour (ThemeColours::defaultText));
     g.drawText(name, 0, 0, 200, 15, Justification::left, false);
 
     g.drawText("Low:", 0, 11, 200, 20, Justification::left, false);
@@ -622,10 +615,8 @@ String SampleRateInterface::getText() { return rateSelection->getText(); }
 
 void SampleRateInterface::paint(Graphics &g)
 {
-    g.setColour(Colours::darkgrey);
-
-    g.setFont(Font("Small Text", 10, Font::plain));
-
+    //g.setFont(Font("Small Text", 10, Font::plain));
+    g.setColour(findColour(ThemeColours::defaultText));
     g.drawText(name, 0, 0, 80, 15, Justification::left, false);
 }
 
@@ -683,7 +674,6 @@ void HeadstageOptionsInterface::set32Channel(int hsIndex, bool is32Channel) {}
 
 void HeadstageOptionsInterface::paint(Graphics &g)
 {
-    g.setColour(Colours::lightgrey);
 
     g.fillRoundedRectangle(5, 0, getWidth() - 10, getHeight(), 4.0f);
 
@@ -716,7 +706,6 @@ AudioInterface::AudioInterface(DeviceThread *board_, DeviceEditor *editor_)
     noiseSlicerLevelSelection->setEditable(true, false, false);
     noiseSlicerLevelSelection->addListener(this);
     noiseSlicerLevelSelection->setBounds(45, 6, 35, 20);
-    noiseSlicerLevelSelection->setColour(Label::textColourId, Colours::darkgrey);
     addAndMakeVisible(noiseSlicerLevelSelection);
 }
 
@@ -769,8 +758,8 @@ int AudioInterface::getNoiseSlicerLevel() { return actualNoiseSlicerLevel; }
 
 void AudioInterface::paint(Graphics &g)
 {
-    g.setColour(Colours::darkgrey);
-    g.setFont(Font("Small Text", 10, Font::plain));
+    //g.setFont(Font("Small Text", 10, Font::plain));
+    g.setColour(findColour(ThemeColours::defaultText));
     g.drawText(name, 0, 0, 200, 15, Justification::left, false);
     g.drawText("Slicer:", 0, 10, 200, 15, Justification::left, false);
 }
@@ -789,7 +778,6 @@ ClockDivideInterface::ClockDivideInterface(DeviceThread *board_, DeviceEditor *e
     divideRatioSelection->setEditable(true, false, false);
     divideRatioSelection->addListener(this);
     divideRatioSelection->setBounds(45, 6, 35, 20);
-    divideRatioSelection->setColour(Label::textColourId, Colours::darkgrey);
     addAndMakeVisible(divideRatioSelection);
 }
 
@@ -841,7 +829,6 @@ DSPInterface::DSPInterface(DeviceThread *board_, DeviceEditor *editor_)
     dspOffsetSelection->setEditable(true, false, false);
     dspOffsetSelection->addListener(this);
     dspOffsetSelection->setBounds(0, 0, 35, 20);
-    dspOffsetSelection->setColour(Label::textColourId, Colours::darkgrey);
     addAndMakeVisible(dspOffsetSelection);
 }
 
