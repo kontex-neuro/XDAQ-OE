@@ -41,6 +41,6 @@ public:
 private:
     TableListBox table{{}, this};
     std::vector<info> &options;
-    UtilityButton refreshButton{"REFRESH", Font("Small Text", 13, Font::plain)};
-    UtilityButton acceptButton{"LAUNCH", Font("Small Text", 13, Font::plain)};
+    UtilityButton refreshButton{"REFRESH"};
+    UtilityButton acceptButton{"LAUNCH"};
 };

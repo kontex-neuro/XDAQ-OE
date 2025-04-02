@@ -117,7 +117,7 @@ std::unique_ptr<GenericEditor> DeviceThread::createEditor(SourceNode *sn)
     return editor;
 }
 
-void DeviceThread::handleBroadcastMessage(String msg)
+void DeviceThread::handleBroadcastMessage(const String &msg, const int64 messageTimeMilliseconds)
 {
     StringArray parts = StringArray::fromTokens(msg, " ", "");
 
@@ -193,15 +193,24 @@ void DeviceThread::setDACthreshold(int dacOutput, float threshold)
 
 void DeviceThread::setDACchannel(int dacOutput, int channel)
 {
-    if (channel >= getNumDataOutputs(ContinuousChannel::ELECTRODE)) return;
-    int channels = 0;
-    for (int s = 0; s < evalBoard->ports.max_streams; ++s, channels += CHANNELS_PER_STREAM) {
+    dacChannelsToUpdate[dacOutput] = true;
+    updateSettingsDuringAcquisition = true;
+    if (channel >= getNumDataOutputs(ContinuousChannel::ELECTRODE)) {
+        dacChannels[dacOutput] = -1;
+        return;
+    }
+    if (channel < 0) {
+        dacChannels[dacOutput] = -1;
+        return;
+    }
+    dacChannels[dacOutput] = channel % CHANNELS_PER_STREAM;
+    for (int s = 0; s < evalBoard->ports.max_streams; ++s) {
         if (!evalBoard->isStreamEnabled(s)) continue;
-        if (channel >= channels + CHANNELS_PER_STREAM) continue;
-        dacChannels[dacOutput] = channel - channels;
+        if (channel >= CHANNELS_PER_STREAM) {
+            channel -= CHANNELS_PER_STREAM;
+            continue;
+        }
         dacStream[dacOutput] = s;
-        dacChannelsToUpdate[dacOutput] = true;
-        updateSettingsDuringAcquisition = true;
         return;
     }
 }
@@ -1036,7 +1045,7 @@ bool DeviceThread::startAcquisition()
                             uint64_t ttl = little2host32(&*io + 16);
                             const int chunk_size = 1;
                             sourceBuffers[0]->addToBuffer(&output_buffer[0], &ts, &_ts, &ttl,
-                                                          chunk_size, chunk_size);
+                                                          chunk_size);
                         }
                     } else if constexpr (std::is_same_v<T, OwnedData>) {
                     } else {

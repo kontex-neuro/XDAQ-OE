@@ -23,6 +23,7 @@
 
 #include "DeviceEditor.h"
 
+#include <charconv>
 #include <cmath>
 
 #include "DeviceThread.h"
@@ -58,7 +59,7 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     }
 
     // add rescan button
-    rescanButton = new UtilityButton("RESCAN", Font("Small Text", 13, Font::plain));
+    rescanButton = new UtilityButton("RESCAN");
     rescanButton->setRadius(3.0f);
     rescanButton->setBounds(6, 108, 65, 18);
     rescanButton->addListener(this);
@@ -77,7 +78,7 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     bandwidthInterface->setBounds(grid_col1, 55, 80, 50);
 
     // add AUX channel enable/disable button
-    auxButton = new UtilityButton("AUX", Font("Small Text", 13, Font::plain));
+    auxButton = new UtilityButton("AUX");
     auxButton->setRadius(3.0f);
     auxButton->setBounds(grid_col1, 108, 32, 18);
     auxButton->addListener(this);
@@ -86,7 +87,7 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     addAndMakeVisible(auxButton);
 
     // add ADC channel enable/disable button
-    adcButton = new UtilityButton("ADC", Font("Small Text", 13, Font::plain));
+    adcButton = new UtilityButton("ADC");
     adcButton->setRadius(3.0f);
     adcButton->setBounds(grid_col1 + 32 + 1, 108, 32, 18);
     adcButton->addListener(this);
@@ -99,27 +100,22 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     audioLabel = new Label("audio label", "Audio out");
     audioLabel->setBounds(grid_col2, 20, 75, 15);
     audioLabel->setFont(Font("Small Text", 10, Font::plain));
-    audioLabel->setColour(Label::textColourId, Colours::darkgrey);
     addAndMakeVisible(audioLabel);
 
-    for (int i = 0; i < 2; i++) {
-        ElectrodeButton *button = new ElectrodeButton(-1);
-        electrodeButtons.add(button);
+    leftAudioOutSelect = std::make_unique<Label>("leftAudioOutSelect", "L");
+    leftAudioOutSelect->setBounds(grid_col2, 35, 30, 15);
+    leftAudioOutSelect->setEditable(true, false, false);
+    leftAudioOutSelect->addListener(this);
+    leftAudioOutSelect->setTooltip("Left audio output channel, clear channel number to disable");
+    addAndMakeVisible(leftAudioOutSelect.get());
 
-        button->setBounds(grid_col2 + i * 30, 35, 30, 15);
-        button->setChannelNum(-1);
-        button->setClickingTogglesState(false);
-        button->setToggleState(false, dontSendNotification);
+    rightAudioOutSelect = std::make_unique<Label>("rightAudioOutSelect", "R");
+    rightAudioOutSelect->setBounds(grid_col2 + 30, 35, 30, 15);
+    rightAudioOutSelect->setEditable(true, false, false);
+    rightAudioOutSelect->addListener(this);
+    rightAudioOutSelect->setTooltip("Right audio output channel, clear channel number to disable");
+    addAndMakeVisible(rightAudioOutSelect.get());
 
-        addAndMakeVisible(button);
-        button->addListener(this);
-
-        if (i == 0) {
-            button->setTooltip("Audio monitor left channel");
-        } else {
-            button->setTooltip("Audio monitor right channel");
-        }
-    }
 
     // add HW audio parameter selection
     audioInterface = new AudioInterface(board, this);
@@ -131,7 +127,7 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     // clockInterface->setBounds(grid_col2, 80, 70, 50);
 
     // add DSP Offset Button
-    dspoffsetButton = new UtilityButton("DSP:", Font("Small Text", 13, Font::plain));
+    dspoffsetButton = new UtilityButton("DSP:");
     dspoffsetButton->setRadius(3.0f);  // sets the radius of the button's corners
     // sets the x position, y position, width, and height of the button
     dspoffsetButton->setBounds(grid_col2, 108, 32, 18);
@@ -149,7 +145,7 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     dspInterface->setBounds(grid_col2 + 32, 108, 40, 50);
 
     const auto grid_col3 = 180 + port_layout_width;
-    dacTTLButton = new UtilityButton("DAC TTL", Font("Small Text", 13, Font::plain));
+    dacTTLButton = new UtilityButton("DAC TTL");
     dacTTLButton->setRadius(3.0f);
     dacTTLButton->setBounds(grid_col3, 25, 60, 18);
     dacTTLButton->addListener(this);
@@ -160,7 +156,6 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     dacHPFlabel = new Label("DAC HPF", "DAC HPF");
     dacHPFlabel->setFont(Font("Small Text", 10, Font::plain));
     dacHPFlabel->setBounds(grid_col3, 40, 60, 20);
-    dacHPFlabel->setColour(Label::textColourId, Colours::darkgrey);
     addAndMakeVisible(dacHPFlabel);
 
     dacHPFcombo = new ComboBox("dacHPFCombo");
@@ -177,7 +172,6 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     ttlSettleLabel = new Label("TTL Settle", "TTL Settle");
     ttlSettleLabel->setFont(Font("Small Text", 10, Font::plain));
     ttlSettleLabel->setBounds(grid_col3, 70, 70, 20);
-    ttlSettleLabel->setColour(Label::textColourId, Colours::darkgrey);
     addAndMakeVisible(ttlSettleLabel);
 
     ttlSettleCombo = new ComboBox("FastSettleComboBox");
@@ -233,6 +227,43 @@ void DeviceEditor::comboBoxChanged(ComboBox *comboBox)
     }
 }
 
+void DeviceEditor::labelTextChanged(Label *labelThatHasChanged)
+{
+    int ch = 0;
+    std::string placeholder;
+    if (labelThatHasChanged == leftAudioOutSelect.get()) {
+        ch = 0;
+        placeholder = "L";
+    } else if (labelThatHasChanged == rightAudioOutSelect.get()) {
+        ch = 1;
+        placeholder = "R";
+    } else
+        return;
+
+    const auto v = labelThatHasChanged->getTextValue().getValue();
+    if (!v.isString()) {
+        LOGE(fmt::format("{} not valid", labelThatHasChanged->getName().toStdString()));
+        return;
+    }
+
+
+    const auto s = v.toString().toStdString();
+    int result{};
+    auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), result);
+    if (ec != std::errc()) {
+        labelThatHasChanged->setText(placeholder, dontSendNotification);
+        board->setDACchannel(ch, -1);
+        return;
+    }
+    if (result >= board->getNumDataOutputs(ContinuousChannel::ELECTRODE)) {
+        labelThatHasChanged->setText(placeholder, dontSendNotification);
+        board->setDACchannel(ch, -1);
+        return;
+    }
+    board->setDACchannel(ch, result);
+}
+
+/*
 void DeviceEditor::channelStateChanged(Array<int> newChannels)
 {
     int selectedChannel = -1;
@@ -252,7 +283,7 @@ void DeviceEditor::channelStateChanged(Array<int> newChannels)
         electrodeButtons[int(activeAudioChannel)]->setToggleState(false, dontSendNotification);
     }
 }
-
+*/
 
 void DeviceEditor::buttonClicked(Button *button)
 {
@@ -262,29 +293,10 @@ void DeviceEditor::buttonClicked(Button *button)
         for (int i = 0; i < 4; i++) {
             headstageOptionsInterfaces[i]->checkEnabledState();
         }
+        // Apply audio output
+        labelTextChanged(leftAudioOutSelect.get());
+        labelTextChanged(rightAudioOutSelect.get());
         CoreServices::updateSignalChain(this);
-    } else if (button == electrodeButtons[0] || button == electrodeButtons[1]) {
-        std::vector<bool> channelStates;
-
-        if (button == electrodeButtons[0])
-            activeAudioChannel = LEFT;
-        else
-            activeAudioChannel = RIGHT;
-
-        for (int i = 0; i < board->getNumDataOutputs(ContinuousChannel::ELECTRODE); i++) {
-            if (electrodeButtons[int(activeAudioChannel)]->getChannelNum() - 1 == i)
-                channelStates.push_back(true);
-            else
-                channelStates.push_back(false);
-        }
-
-        auto *channelSelector = new PopupChannelSelector(this, channelStates);
-
-        channelSelector->setChannelButtonColour(Colour(0, 174, 239));
-        channelSelector->setMaximumSelectableChannels(1);
-
-        CallOutBox &myBox = CallOutBox::launchAsynchronously(
-            std::unique_ptr<Component>(channelSelector), button->getScreenBounds(), nullptr);
     } else if (button == auxButton && !acquisitionIsActive) {
         board->enableAuxs(button->getToggleState());
         LOGD("AUX Button toggled");
@@ -338,8 +350,8 @@ void DeviceEditor::saveVisualizerEditorParameters(XmlElement *xml)
     xml->setAttribute("HighCut", bandwidthInterface->getUpperBandwidth());
     xml->setAttribute("AUXsOn", auxButton->getToggleState());
     xml->setAttribute("ADCsOn", adcButton->getToggleState());
-    xml->setAttribute("AudioOutputL", electrodeButtons[0]->getChannelNum());
-    xml->setAttribute("AudioOutputR", electrodeButtons[1]->getChannelNum());
+    xml->setAttribute("AudioOutputL", leftAudioOutSelect->getText());
+    xml->setAttribute("AudioOutputR", rightAudioOutSelect->getText());
     xml->setAttribute("NoiseSlicer", audioInterface->getNoiseSlicerLevel());
     xml->setAttribute("TTLFastSettle", ttlSettleCombo->getSelectedId());
     xml->setAttribute("DAC_TTL", dacTTLButton->getToggleState());
@@ -387,16 +399,10 @@ void DeviceEditor::loadVisualizerEditorParameters(XmlElement *xml)
     if (dio32_button)
         dio32_button->setToggleState(xml->getBoolAttribute("DIO32"), sendNotification);
 
-    int AudioOutputL = xml->getIntAttribute("AudioOutputL", -1);
-    int AudioOutputR = xml->getIntAttribute("AudioOutputR", -1);
-
-    electrodeButtons[0]->setChannelNum(AudioOutputL);
-    board->setDACchannel(0, AudioOutputL);
-    if (AudioOutputL > -1) electrodeButtons[0]->setToggleState(true, dontSendNotification);
-
-    electrodeButtons[1]->setChannelNum(AudioOutputR);
-    board->setDACchannel(1, AudioOutputR);
-    if (AudioOutputR > -1) electrodeButtons[1]->setToggleState(true, dontSendNotification);
+    leftAudioOutSelect->setText(xml->getStringAttribute("AudioOutputL", "L"),
+                                juce::sendNotification);
+    rightAudioOutSelect->setText(xml->getStringAttribute("AudioOutputR", "R"),
+                                 juce::sendNotification);
 
     forEachXmlChildElementWithTagName(*xml, adc, "ADCRANGE")
     {
@@ -451,14 +457,12 @@ BandwidthInterface::BandwidthInterface(DeviceThread *board_, DeviceEditor *edito
     upperBandwidthSelection->setEditable(true, false, false);
     upperBandwidthSelection->addListener(this);
     upperBandwidthSelection->setBounds(30, 25, 60, 20);
-    upperBandwidthSelection->setColour(Label::textColourId, Colours::darkgrey);
     addAndMakeVisible(upperBandwidthSelection);
 
     lowerBandwidthSelection = new Label("LowerBandwidth", lastLowCutString);
     lowerBandwidthSelection->setEditable(true, false, false);
     lowerBandwidthSelection->addListener(this);
     lowerBandwidthSelection->setBounds(30, 10, 60, 20);
-    lowerBandwidthSelection->setColour(Label::textColourId, Colours::darkgrey);
 
     addAndMakeVisible(lowerBandwidthSelection);
 }
@@ -537,10 +541,8 @@ double BandwidthInterface::getUpperBandwidth() { return actualUpperBandwidth; }
 
 void BandwidthInterface::paint(Graphics &g)
 {
-    g.setColour(Colours::darkgrey);
-
-    g.setFont(Font("Small Text", 10, Font::plain));
-
+    // g.setFont(Font("Small Text", 10, Font::plain));
+    g.setColour(findColour(ThemeColours::defaultText));
     g.drawText(name, 0, 0, 200, 15, Justification::left, false);
 
     g.drawText("Low:", 0, 11, 200, 20, Justification::left, false);
@@ -605,10 +607,8 @@ String SampleRateInterface::getText() { return rateSelection->getText(); }
 
 void SampleRateInterface::paint(Graphics &g)
 {
-    g.setColour(Colours::darkgrey);
-
-    g.setFont(Font("Small Text", 10, Font::plain));
-
+    // g.setFont(Font("Small Text", 10, Font::plain));
+    g.setColour(findColour(ThemeColours::defaultText));
     g.drawText(name, 0, 0, 80, 15, Justification::left, false);
 }
 
@@ -622,8 +622,7 @@ HeadstageOptionsInterface::HeadstageOptionsInterface(DeviceThread *board_, Devic
     const auto max_chips_per_port = board_->get_ports().max_chips_per_port;
     for (int chip = 0; chip < max_chips_per_port; ++chip) {
         headstage_ids.push_back(port_idx * max_chips_per_port + chip);
-        hsButtons.push_back(
-            std::make_unique<UtilityButton>(" ", Font("Small Text", 13, Font::plain)));
+        hsButtons.push_back(std::make_unique<UtilityButton>(" "));
         hsButtons.back()->setRadius(3.0f);
         hsButtons.back()->setBounds(23 + 20 * chip, 1, 20, 17);
         hsButtons.back()->setEnabledState(false);
@@ -666,8 +665,6 @@ void HeadstageOptionsInterface::set32Channel(int hsIndex, bool is32Channel) {}
 
 void HeadstageOptionsInterface::paint(Graphics &g)
 {
-    g.setColour(Colours::lightgrey);
-
     g.fillRoundedRectangle(5, 0, getWidth() - 10, getHeight(), 4.0f);
 
     if (isEnabled())
@@ -699,7 +696,6 @@ AudioInterface::AudioInterface(DeviceThread *board_, DeviceEditor *editor_)
     noiseSlicerLevelSelection->setEditable(true, false, false);
     noiseSlicerLevelSelection->addListener(this);
     noiseSlicerLevelSelection->setBounds(45, 6, 35, 20);
-    noiseSlicerLevelSelection->setColour(Label::textColourId, Colours::darkgrey);
     addAndMakeVisible(noiseSlicerLevelSelection);
 }
 
@@ -752,8 +748,8 @@ int AudioInterface::getNoiseSlicerLevel() { return actualNoiseSlicerLevel; }
 
 void AudioInterface::paint(Graphics &g)
 {
-    g.setColour(Colours::darkgrey);
-    g.setFont(Font("Small Text", 10, Font::plain));
+    // g.setFont(Font("Small Text", 10, Font::plain));
+    g.setColour(findColour(ThemeColours::defaultText));
     g.drawText(name, 0, 0, 200, 15, Justification::left, false);
     g.drawText("Slicer:", 0, 10, 200, 15, Justification::left, false);
 }
@@ -772,7 +768,6 @@ ClockDivideInterface::ClockDivideInterface(DeviceThread *board_, DeviceEditor *e
     divideRatioSelection->setEditable(true, false, false);
     divideRatioSelection->addListener(this);
     divideRatioSelection->setBounds(45, 6, 35, 20);
-    divideRatioSelection->setColour(Label::textColourId, Colours::darkgrey);
     addAndMakeVisible(divideRatioSelection);
 }
 
@@ -824,7 +819,6 @@ DSPInterface::DSPInterface(DeviceThread *board_, DeviceEditor *editor_)
     dspOffsetSelection->setEditable(true, false, false);
     dspOffsetSelection->addListener(this);
     dspOffsetSelection->setBounds(0, 0, 35, 20);
-    dspOffsetSelection->setColour(Label::textColourId, Colours::darkgrey);
     addAndMakeVisible(dspOffsetSelection);
 }
 

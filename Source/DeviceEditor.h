@@ -43,7 +43,7 @@ struct ImpedanceData;
 class DeviceEditor : public VisualizerEditor,
                      public ComboBox::Listener,
                      public Button::Listener,
-                     public PopupChannelSelector::Listener
+                     public Label::Listener
 
 {
 public:
@@ -83,12 +83,13 @@ public:
     /** Creates an interface with additional channel settings*/
     Visualizer *createNewCanvas(void) override;
 
-    /** Called by PopupChannelSelector */
-    void channelStateChanged(Array<int> newChannels) override;
+    
+    void labelTextChanged (Label* labelThatHasChanged) override;
 
 private:
     OwnedArray<HeadstageOptionsInterface> headstageOptionsInterfaces;
-    OwnedArray<ElectrodeButton> electrodeButtons;
+    std::unique_ptr<Label> leftAudioOutSelect;
+    std::unique_ptr<Label> rightAudioOutSelect;
 
     ScopedPointer<SampleRateInterface> sampleRateInterface;
     ScopedPointer<BandwidthInterface> bandwidthInterface;
@@ -111,10 +112,6 @@ private:
 
     DeviceThread *board;
     ChannelCanvas *canvas;
-
-    enum AudioChannel { LEFT = 0, RIGHT = 1 };
-
-    AudioChannel activeAudioChannel;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DeviceEditor);
 };

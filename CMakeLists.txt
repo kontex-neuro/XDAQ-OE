@@ -16,7 +16,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_MODULE_PATH}
 )
 
-set(CMAKE_OSX_ARCHITECTURES "x86_64" CACHE STRING "Build architecture for Mac OS X" FORCE)
+# set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Build architecture for Mac OS X" FORCE)
 
 project(OE_PLUGIN_${PLUGIN_NAME} VERSION 0.2.0 LANGUAGES CXX)
 
@@ -102,8 +102,8 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 
 if(INSTALL_TO_SYSTEM)
-	set(PLUGIN_INSTALL_DIR plugins-api8)
-	set(SHARED_INSTALL_DIR shared-api8)
+	set(PLUGIN_INSTALL_DIR plugins-api9)
+	set(SHARED_INSTALL_DIR shared-api9)
 else()
 	set(PLUGIN_INSTALL_DIR ${CONFIGURATION_FOLDER}/plugins)
 	set(SHARED_INSTALL_DIR ${CONFIGURATION_FOLDER}/shared)
@@ -120,13 +120,18 @@ if(MSVC)
 elseif(LINUX)
 	target_link_libraries(${PLUGIN_NAME} GL X11 Xext Xinerama asound dl freetype pthread rt)
 	set_property(TARGET ${PLUGIN_NAME} APPEND_STRING PROPERTY LINK_FLAGS
-		"-fvisibility=hidden -fPIC -rdynamic -Wl,-rpath='$ORIGIN/../shared' -Wl,-rpath='$ORIGIN/../shared-api8'")
+		"-fvisibility=hidden -fPIC -rdynamic -Wl,-rpath='$ORIGIN/../shared' -Wl,-rpath='$ORIGIN/../shared-api9'")
 	target_compile_options(${PLUGIN_NAME} PRIVATE -fPIC -rdynamic)
 	target_compile_options(${PLUGIN_NAME} PRIVATE -O3) #enable optimization for linux debug
 elseif(APPLE)
 	set_target_properties(${PLUGIN_NAME} PROPERTIES BUNDLE TRUE)
 	set_property(TARGET ${PLUGIN_NAME} APPEND_STRING PROPERTY LINK_FLAGS
-	"-undefined dynamic_lookup -rpath @loader_path/../../../../shared-api8")
+	"-undefined dynamic_lookup -rpath @loader_path/../../../../shared-api9")
+
+	set_target_properties(${PLUGIN_NAME} PROPERTIES
+		XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
+		XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED NO
+	)
 endif()
 
 install(TARGETS ${PLUGIN_NAME}
