@@ -21,11 +21,14 @@
 #include "rhd2000evalboard.h"
 
 #include <fmt/format.h>
+#include <xdaq/data_streams.h>
 #include <xdaq/device_manager.h>
 
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <expected>
+#include <future>
 #include <iostream>
 #include <mutex>
 #include <nlohmann/json.hpp>
@@ -35,6 +38,7 @@
 
 #include "intan_chip.h"
 #include "rhd2000datablock.h"
+
 
 
 using namespace std;
@@ -1046,127 +1050,75 @@ bool Rhd2000EvalBoard::isDataClockLocked() const
 void Rhd2000EvalBoard::flush()
 {
     lock_guard<mutex> lockOk(okMutex);
-
-    // override pipeout block throttle
-    // read all data from fifo
-    // reset pipeout block throttle
-    unsigned char buffer[4096];
-    while(auto r = dev->read(0xA0, 4096, buffer)){
-    }
-
-    dev->set_register_sync(WireInResetRun, 1 << 17, 1 << 17);
-    dev->set_register_sync(WireInResetRun, 0 << 17, 1 << 17);
+    dev->read(0xA0, 0, nullptr);
 }
 
-// Reads a certain number of USB data blocks, if the specified number is available, and writes the
-// raw bytes to a buffer.  Returns total number of bytes read.
-long Rhd2000EvalBoard::read_raw_samples(int samples, unsigned char *buffer)
-{
-    long result = dev->read(PipeOutData, samples * get_sample_size<char>(), buffer);
-
-
-    if (result < 0) cerr << "read data error" << result << endl;
-
-    return result;
-}
-
-int Rhd2000EvalBoard::read_raw_to_buffer(int bytes, unsigned char *buffer)
-{
-    return dev->read(PipeOutData, bytes, buffer);
-}
-
-std::optional<Rhd2000DataBlock> Rhd2000EvalBoard::run_and_read_samples(
+std::expected<Rhd2000DataBlock, std::string> Rhd2000EvalBoard::run_and_read_samples(
     int samples, std::optional<std::chrono::milliseconds> timeout)
 {
-    setMaxTimeStep(samples);
+    const auto sample_size = get_sample_size<char>();
+
+    constexpr int hw_events_per_sec = 100;
+    const auto expected_data_rate = sample_size * getSampleRate();
+    const int chunk_size = expected_data_rate / hw_events_per_sec;
+
+    std::promise<std::expected<Rhd2000DataBlock, std::string>> result_promise;
+
+    auto result = result_promise.get_future();
+
+    auto s = dev->start_read_stream(
+        PipeOutData,
+        xdaq::queue<xdaq::Device>(
+            [this, sample_size, samples = samples,
+             result_promise = std::make_optional(std::move(result_promise)),
+             buffer = std::vector<unsigned char>(),
+             streams = numDataStreams](auto &&event) mutable {
+                if (!result_promise.has_value()) return;
+                std::visit(
+                    [&](auto &&event) {
+                        using T = std::decay_t<decltype(event)>;
+                        using namespace xdaq::DataStream::Events;
+                        if constexpr (std::is_same_v<T, Stop>) {
+                        } else if constexpr (std::is_same_v<T, Error>) {
+                            result_promise->set_value(
+                                std::unexpected(fmt::format("Datastream Error {}", event.error)));
+                            result_promise.reset();
+                        } else if constexpr (std::is_same_v<T, DataView>) {
+                        } else if constexpr (std::is_same_v<T, OwnedData>) {
+                            std::copy(event.buffer.get(),
+                                      event.buffer.get() +
+                                          std::min<std::size_t>(
+                                              sample_size * samples - buffer.size(), event.length),
+                                      std::back_inserter(buffer));
+                            if (buffer.size() == sample_size * samples) {
+                                result_promise->set_value(Rhd2000DataBlock(numDataStreams, samples,
+                                                                           dio32, buffer.data()));
+                                result_promise.reset();
+                            }
+                        } else {
+                            static_assert(xdaq::always_false_v<T>, "non-exhaustive visitor");
+                        }
+                    },
+                    std::move(event));
+            },
+            32, std::chrono::nanoseconds{0}),
+        chunk_size);
+    auto bytes_required = sample_size * samples;
+    setMaxTimeStep(((bytes_required + chunk_size - 1) / chunk_size * chunk_size + sample_size - 1) /
+                   sample_size);
     setContinuousRunMode(false);
     run();
-    if (timeout) {
-        auto start = std::chrono::high_resolution_clock::now();
-        while (isRunning()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            auto now = std::chrono::high_resolution_clock::now();
-            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start) > *timeout) {
-                std::cerr << "Timeout waiting for data block" << std::endl;
-                return std::nullopt;
-            }
-        }
-    } else {
-        while (isRunning());
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    const auto expected_sample_time =
+        std::chrono::milliseconds{(int) (1000 * samples * sample_size / getSampleRate())};
+    auto wait_result = result.wait_for(expected_sample_time + 2s);
+    s->reset();
+    while (isRunning()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    flush();
 
-    return read_samples(samples);
-}
-// Read data block from the USB interface, if one is available.  Returns true if data block
-// was available.
-std::optional<Rhd2000DataBlock> Rhd2000EvalBoard::read_samples(int samples)
-{
-    lock_guard<mutex> lockOk(okMutex);
-    auto result = read_raw_samples(samples, &usbBuffer[0]);
-    const auto ss = get_sample_size<char>();
-    if (result < 0) {
-        std::cerr << "Error reading data block " << result << std::endl;
-        return std::nullopt;
-    }
-    // for(int f=0;f<3;++f){
-    //     for(int i=0;i<ss;++i){
-    //         fmt::print("{:02x} ", usbBuffer[f*ss + i]);
-    //         if(i==11) fmt::print("\n");
-    //         if((i-12)%32 == 31)
-    //             fmt::print("\n");
-    //     }
-    //     fmt::print("\n");
-    // }
-    return std::make_optional<Rhd2000DataBlock>(numDataStreams, samples, dio32, &usbBuffer[0]);
-}
-
-int Rhd2000EvalBoard::read_to_buffer(int samples, unsigned char *buffer)
-{
-    lock_guard<mutex> lockOk(okMutex);
-    auto result = read_raw_samples(samples, buffer);
-    if (result < 0) {
-        std::cerr << "Error reading data block " << result << std::endl;
-        return -1;
-    }
-    return result;
-}
-// Reads a certain number of USB data blocks, if the specified number is available, and appends them
-// to queue.  Returns true if data blocks were available.
-
-bool Rhd2000EvalBoard::readDataBlocks(int numBlocks, std::queue<Rhd2000DataBlock> &dataQueue)
-{
-    lock_guard<mutex> lockOk(okMutex);
-
-    auto result = read_raw_samples(numBlocks * SAMPLES_PER_DATA_BLOCK, &usbBuffer[0]);
-    const auto bs =
-        block_size<char>(SAMPLES_PER_DATA_BLOCK, numDataStreams, CHANNELS_PER_STREAM, dio32);
-
-    for (int i = 0; i < numBlocks; ++i) {
-        dataQueue.emplace(numDataStreams, SAMPLES_PER_DATA_BLOCK, dio32, &usbBuffer[0] + i * bs);
-    }
-
-    return true;
-}
-
-
-// Return name of Opal Kelly board based on model code.
-string Rhd2000EvalBoard::opalKellyModelName(int model) const
-{
-    switch (model) {
-    default: return ("UNKNOWN");
-    }
-}
-
-// Return 4-bit "board mode" input.
-int Rhd2000EvalBoard::getBoardMode()
-{
-    lock_guard<mutex> lockOk(okMutex);
-    int mode;
-
-    mode = dev->get_register_sync(WireOutBoardMode).value();
-
-    return mode;
+    if (wait_result == std::future_status::timeout)
+        return std::unexpected("Read Timeout");
+    else
+        return result.get();
 }
 
 
@@ -1326,10 +1278,13 @@ const std::vector<IntanChip::Chip> &Rhd2000EvalBoard::scan_chips()
     for (int delay = 0; delay < 16; ++delay) {
         setCableDelay(Rhd2000EvalBoard::SPIPort::All, delay);
         auto db = run_and_read_samples(SAMPLES_PER_DATA_BLOCK);
-        if (!db) throw runtime_error("Failed to read data block");
-        for (int stream = 0; stream < ports.max_non_ddr_streams; ++stream) {
-            scan_results[delay].push_back(
-                IntanChip::parse_device_id(&db->aux[2][stream * db->num_samples]));
+        if (db) {
+            for (int stream = 0; stream < ports.max_non_ddr_streams; ++stream) {
+                scan_results[delay].push_back(
+                    IntanChip::parse_device_id(&db->aux[2][stream * db->num_samples]));
+            }
+        }else{
+            throw runtime_error("Failed to read data block");
         }
     }
 

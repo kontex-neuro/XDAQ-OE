@@ -367,28 +367,11 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
             const auto commands = board->chipRegisters.createCommandListRegisterConfig(false);
             // Upload version with no ADC calibration to AuxCmd3 RAM Bank 1.
             board->evalBoard->uploadCommandList(commands, Rhd2000EvalBoard::AuxCmdSlot::AuxCmd3, 3);
-
-            board->evalBoard->run();
-            auto read_begin = buffer.begin();
-            while (board->evalBoard->isRunning()) {
-                auto to_read = buffer.end() - read_begin;
-                if (to_read == 0) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                    continue;
-                }
-                auto r = board->evalBoard->read_raw_to_buffer(to_read, &*read_begin);
-                if (r < 0) {
-                    std::cerr << "Error reading data from board" << std::endl;
-                    return std::nullopt;
-                }
-                if (r == 0) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                    continue;
-                }
-                read_begin += r;
+            auto res = board->evalBoard->run_and_read_samples(SAMPLES_PER_DATA_BLOCK * numBlocks);
+            if (!res.has_value()) {
+                LOGE(fmt::format("Read error {}", res.error()));
+                return std::nullopt;
             }
-            Rhd2000DataBlock db(numdataStreams, SAMPLES_PER_DATA_BLOCK * numBlocks,
-                                board->evalBoard->get_dio32(), buffer.data());
 
             for (int stream = 0; stream < numdataStreams; ++stream) {
                 setProgress(float(capRange) / 3.0f +
@@ -396,7 +379,7 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
                             (float(stream) / float(numdataStreams) / 32.0f / 3.0f));
 
                 const auto r = measureComplexAmplitude(
-                    {&db.amp[(stream * 32 + channel) * SAMPLES_PER_DATA_BLOCK * numBlocks],
+                    {&res.value().amp[(stream * 32 + channel) * SAMPLES_PER_DATA_BLOCK * numBlocks],
                      static_cast<std::size_t>(SAMPLES_PER_DATA_BLOCK * numBlocks)},
                     numBlocks, board->settings.boardSampleRate, actualImpedanceFreq, numPeriods);
                 measuredMagnitude[stream][channel % 32][capRange] = std::abs(r);

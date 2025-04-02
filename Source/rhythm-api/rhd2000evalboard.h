@@ -44,6 +44,7 @@
 #include <optional>
 #include <queue>
 #include <string>
+#include <expected>
 
 #include "ports.h"
 #include "rhd2000datablock.h"
@@ -188,16 +189,9 @@ public:
         return sample_size<Unit>(numDataStreams, CHANNELS_PER_STREAM, dio32);
     }
 
-    std::optional<Rhd2000DataBlock> run_and_read_samples(
+    std::expected<Rhd2000DataBlock, std::string> run_and_read_samples(
         int samples, std::optional<std::chrono::milliseconds> timeout = std::nullopt);
-    std::optional<Rhd2000DataBlock> read_samples(int samples);
 
-    int read_to_buffer(int samples, unsigned char *buffer);
-    int read_raw_to_buffer(int bytes, unsigned char *buffer);
-
-    bool readDataBlocks(int numBlocks, std::queue<Rhd2000DataBlock> &dataQueue);
-
-    int getBoardMode();
     int getCableDelay(SPIPort port) const;
     void getCableDelay(std::vector<int> &delays) const;
 
