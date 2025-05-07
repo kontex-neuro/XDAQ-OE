@@ -1068,7 +1068,7 @@ std::expected<Rhd2000DataBlock, std::string> Rhd2000EvalBoard::run_and_read_samp
 
     auto s = dev->start_read_stream(
         PipeOutData,
-        xdaq::queue<xdaq::Device>(
+        xdaq::DataStream::queue(
             [this, sample_size, samples = samples,
              result_promise = std::make_optional(std::move(result_promise)),
              buffer = std::vector<unsigned char>(),
@@ -1101,7 +1101,7 @@ std::expected<Rhd2000DataBlock, std::string> Rhd2000EvalBoard::run_and_read_samp
                     },
                     std::move(event));
             },
-            32, std::chrono::nanoseconds{0}),
+            32, 4096, std::chrono::nanoseconds{0}),
         chunk_size);
     auto bytes_required = sample_size * samples;
     setMaxTimeStep(((bytes_required + chunk_size - 1) / chunk_size * chunk_size + sample_size - 1) /
@@ -1283,7 +1283,7 @@ const std::vector<IntanChip::Chip> &Rhd2000EvalBoard::scan_chips()
                 scan_results[delay].push_back(
                     IntanChip::parse_device_id(&db->aux[2][stream * db->num_samples]));
             }
-        }else{
+        } else {
             throw runtime_error("Failed to read data block");
         }
     }

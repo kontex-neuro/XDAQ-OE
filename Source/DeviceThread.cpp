@@ -990,7 +990,7 @@ bool DeviceThread::startAcquisition()
     using namespace utils::endian;
 
 
-    auto aligned_cb = xdaq::aligned_read_stream<xdaq::Device>(
+    auto aligned_cb = xdaq::DataStream::aligned_read_stream(
         [output_buffer = std::vector<float>(current_aquisition_channels * 1), isddrstream,
          sample_size, streams = evalBoard->getNumEnabledDataStreams(),
          aux_buffer = std::array<float, 32 * 3>(), this](auto &&event) mutable {
@@ -1049,7 +1049,7 @@ bool DeviceThread::startAcquisition()
 
     auto new_stream = evalBoard->dev->start_read_stream(
         0xa0,
-        xdaq::queue<xdaq::Device>(
+        xdaq::DataStream::queue(
             [this, aligned_cb = std::move(aligned_cb)](auto &&event) mutable {
                 if (std::holds_alternative<Events::Error>(event)) {
                     LOGE(fmt::format("Getting data stream error : {}",
@@ -1102,7 +1102,7 @@ bool DeviceThread::startAcquisition()
                          TTL_OUTPUT_STATE[5], TTL_OUTPUT_STATE[6], TTL_OUTPUT_STATE[7]);
                 }
             },
-            128, std::chrono::microseconds(10)),
+            128, 4096, std::chrono::microseconds(10)),
         chunk_size);
 
     if (!new_stream) {
