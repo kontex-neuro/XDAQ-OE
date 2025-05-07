@@ -62,6 +62,12 @@ target_compile_definitions(${PLUGIN_NAME} PRIVATE
 	PLUGIN_VERSION_PATCH=${PROJECT_VERSION_PATCH}
 )
 
+target_compile_definitions(${PLUGIN_NAME} PRIVATE
+	$<$<PLATFORM_ID:Linux>:OS_LINUX>
+	$<$<PLATFORM_ID:Windows>:OS_WINDOWS>
+	$<$<PLATFORM_ID:Darwin>:OS_MACOS>
+)
+
 target_compile_features(${PLUGIN_NAME} PUBLIC cxx_auto_type cxx_generalized_initializers)
 target_compile_options(${PLUGIN_NAME} PRIVATE $<$<PLATFORM_ID:Darwin>:-fexperimental-library>)
 target_compile_options(${PLUGIN_NAME} PRIVATE $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-Wno-deprecated-declarations>)
@@ -125,14 +131,9 @@ elseif(LINUX)
 	target_compile_options(${PLUGIN_NAME} PRIVATE -O3) #enable optimization for linux debug
 elseif(APPLE)
 	set_target_properties(${PLUGIN_NAME} PROPERTIES BUNDLE TRUE)
-	set_property(TARGET ${PLUGIN_NAME} APPEND_STRING PROPERTY LINK_FLAGS
-	"-undefined dynamic_lookup -rpath @loader_path/../../../../shared-api8")
+	set_property(TARGET ${PLUGIN_NAME} APPEND_STRING PROPERTY LINK_FLAGS "-undefined dynamic_lookup")
 endif()
 
-install(TARGETS ${PLUGIN_NAME}
-	LIBRARY DESTINATION ${PLUGIN_INSTALL_DIR}
-    RUNTIME DESTINATION ${PLUGIN_INSTALL_DIR}
-)
 
 #create filters for vs and xcode
 
@@ -154,11 +155,14 @@ target_link_libraries(${PLUGIN_NAME} PRIVATE
 	nlohmann_json::nlohmann_json
 )
 
-install(DIRECTORY ${XDAQ_DEVICE_MANAGER_DIR} DESTINATION ${SHARED_INSTALL_DIR}/xdaq)
-install(DIRECTORY ${XDAQ_RESOURCES_DIR} DESTINATION ${SHARED_INSTALL_DIR}/xdaq)
 
 if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
-
+	install(TARGETS ${PLUGIN_NAME}
+		LIBRARY DESTINATION ${PLUGIN_INSTALL_DIR}
+		RUNTIME DESTINATION ${PLUGIN_INSTALL_DIR}
+	)
+	install(DIRECTORY ${XDAQ_DEVICE_MANAGER_DIR} DESTINATION ${SHARED_INSTALL_DIR}/xdaq)
+	install(DIRECTORY ${XDAQ_RESOURCES_DIR} DESTINATION ${SHARED_INSTALL_DIR}/xdaq)
 	set(CPACK_PACKAGE_NAME ${PLUGIN_NAME})
 	set(CPACK_PACKAGE_DIRECTORY ${CMAKE_BINARY_DIR}/package)
 
@@ -170,6 +174,20 @@ if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
 	string(REPLACE "/" "\\\\" CPACK_NSIS_INSTALL_ROOT ${CMAKE_INSTALL_PREFIX})
 	set(CPACK_PACKAGE_INSTALL_DIRECTORY "")
 
-	include(CPACK)
-
+elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
+	install(TARGETS ${PLUGIN_NAME}
+		LIBRARY DESTINATION ${PLUGIN_INSTALL_DIR}
+		RUNTIME DESTINATION ${PLUGIN_INSTALL_DIR}
+	)
+	install(DIRECTORY ${XDAQ_DEVICE_MANAGER_DIR}
+		DESTINATION ${PLUGIN_INSTALL_DIR}/${PLUGIN_NAME}.bundle/Contents/PlugIns
+	)
+	install(DIRECTORY ${XDAQ_RESOURCES_DIR}
+		DESTINATION ${PLUGIN_INSTALL_DIR}/${PLUGIN_NAME}.bundle/Contents/PlugIns
+	)
+	set(CPACK_GENERATOR "DragNDrop")
+	set(CPACK_DMG_DISABLE_APPLICATIONS_SYMLINK ON)
+    set(CPACK_PRE_BUILD_SCRIPTS "${CMAKE_SOURCE_DIR}/cmake/codesign.cmake")
 endif()
+
+include(CPACK)
