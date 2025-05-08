@@ -1,0 +1,73 @@
+name: Publish XDAQ-OE
+
+on:
+    workflow_dispatch:
+    push:
+        tags:
+            - "xdaq-v*"
+
+jobs:
+    build:
+        uses: ./.github/workflows/build.yml
+
+    publish:
+        runs-on: ubuntu-24.04
+        needs: build
+
+        steps:
+            - name: Download all artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  path: dist
+
+            - name: Flatten dist folder
+              run: |
+                  find dist -name '*.zip' -exec mv {} dist/ \;
+                  find dist -mindepth 1 -type d -exec rm -rf {} +
+                  ls -la dist
+
+            - name: Extract and repack
+              run: |
+                  set -euo pipefail
+
+                  # Ensure this is a tag in the form xdaq-v*
+                  ref="${{ github.ref_name }}"
+                  if [[ "$ref" != xdaq-v* ]]; then
+                      echo "Not a release tag: $ref"
+                      exit 1
+                  fi
+
+                  upload_tag="${ref#xdaq-}"
+                  api_ver="8"
+
+                  mkdir -p repacked
+                  for f in dist/*.zip; do
+                      base=$(basename "$f" .zip)
+                      mkdir -p "unzipped/$base"
+                      unzip "$f" -d "unzipped/$base"
+
+                      new_name="XDAQ-${base}_${upload_tag}-API${api_ver}.zip"
+
+                      cd "unzipped/$base"
+                      zip -r -X "../../repacked/$new_name" install
+                      cd - > /dev/null
+
+                      echo "Created: $new_name"
+
+                      # Upload (disabled for now)
+                      # if [[ "$base" == windows-* ]]; then
+                      #   curl -H "X-JFrog-Art-Api:${{ secrets.artifactoryApiKey }}" -T "../../repacked/$new_name" \
+                      #     "https://openephys.jfrog.io/artifactory/XDAQ-plugin/windows/$new_name"
+                      # elif [[ "$base" == mac-* ]]; then
+                      #   curl -H "X-JFrog-Art-Api:${{ secrets.artifactoryApiKey }}" -T "../../repacked/$new_name" \
+                      #     "https://openephys.jfrog.io/artifactory/XDAQ-plugin/mac/$new_name"
+                      # else
+                      #   echo "Unknown platform in $base, skipping upload"
+                      # fi
+                  done
+
+            - name: Upload test zips
+              uses: actions/upload-artifact@v4
+              with:
+                  name: test-zips
+                  path: repacked/*.zip

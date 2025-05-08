@@ -1,7 +1,8 @@
 name: Build XDAQ-OE plugin
 
 on:
-    push:
+    workflow_dispatch:
+    workflow_call:
 
 jobs:
     build:
@@ -13,13 +14,13 @@ jobs:
                       base_name: windows-x86_64
                     - os: macos-15
                       arch: x64
-                      base_name: macos-x86_64
+                      base_name: mac-x86_64
                     # - os: ubuntu-24.04
                     #   arch: x64
                     #   base_name: linux-x86_64
                     # - os: macos-15
                     #   arch: arm64
-                    #   base_name: macos-armv8
+                    #   base_name: mac-armv8
 
         runs-on: ${{ matrix.os }}
 
