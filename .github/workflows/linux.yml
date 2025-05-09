@@ -1,7 +1,7 @@
 name: linux
 
 on:
-    push:
+    workflow_dispatch:
 
 jobs:
     build-linux:
@@ -34,7 +34,6 @@ jobs:
             #    - name: test
             #      run: cd build && ctest
             - name: deploy
-              if: github.ref == 'refs/heads/main'
               env:
                   artifactoryApiKey: ${{ secrets.artifactoryApiKey }}
                   build_dir: "Build"
@@ -50,4 +49,12 @@ jobs:
                   cp Resources/xdaq.bit shared
                   zipfile=${package}_${new_plugin_ver}.zip
                   zip -r -X $zipfile plugins shared
-                  curl -H "X-JFrog-Art-Api:$artifactoryApiKey" -T $zipfile "https://openephys.jfrog.io/artifactory/XDAQ-plugin/linux/$zipfile"
+                  echo curl -H "X-JFrog-Art-Api:$artifactoryApiKey" -T $zipfile "https://openephys.jfrog.io/artifactory/XDAQ-plugin/linux/$zipfile"
+                  mkdir repacked
+                  mv $zipfile repacked
+
+            - name: upload artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: linux
+                  path: repacked/*.zip
