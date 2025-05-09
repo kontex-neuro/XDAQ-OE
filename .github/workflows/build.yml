@@ -79,13 +79,14 @@ jobs:
             - name: Build XDAQ-OE
               run: |
                   conan install . --build=missing --profile:all ${{ matrix.os }}-${{ matrix.arch }} -s build_type=Release
-                  cmake -S . -B build/Release --preset conan-release -DCMAKE_INSTALL_PREFIX=install -DINSTALL_TO_SYSTEM=ON -DGUI_BASE_DIR=plugin-GUI
+                  cmake -S . -B build/Release --preset conan-release -DCMAKE_INSTALL_PREFIX=install -DINSTALL_TO_SYSTEM=OFF -DGUI_BASE_DIR=plugin-GUI
                   cmake --build build/Release --preset conan-release
                   cmake --build build/Release --preset conan-release --target install
 
             - name: zip
+              shell: bash
               run: |
-                  7z a ${{ matrix.base_name }}.zip install
+                  7z a ${{ matrix.base_name }}.zip ./install/*
 
             - name: Upload artifact
               uses: actions/upload-artifact@v4
