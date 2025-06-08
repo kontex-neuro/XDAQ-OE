@@ -13,14 +13,11 @@ jobs:
                       arch: x64
                       base_name: windows-x86_64
                     - os: macos-15
-                      arch: x64
+                      arch: arm64
                       base_name: mac-x86_64
-                    # - os: ubuntu-24.04
-                    #   arch: x64
-                    #   base_name: linux-x86_64
-                    # - os: macos-15
-                    #   arch: arm64
-                    #   base_name: mac-armv8
+                    - os: ubuntu-22.04
+                      arch: x64
+                      base_name: linux-x86_64
 
         runs-on: ${{ matrix.os }}
 
@@ -37,6 +34,15 @@ jobs:
               run: |
                   echo "CC=$(brew --prefix llvm@18)/bin/clang" >> $GITHUB_ENV
                   echo "CXX=$(brew --prefix llvm@18)/bin/clang++" >> $GITHUB_ENV
+
+            - name: Setup Compiler (Ubuntu 22)
+              if: matrix.os == 'ubuntu-22.04'
+              run: |
+                sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
+                sudo apt-get update -y
+                sudo apt-get install gcc-13 g++-13 -y
+                echo "CC=gcc-13" >> $GITHUB_ENV
+                echo "CXX=g++-13" >> $GITHUB_ENV
 
             - name: Checkout code
               uses: actions/checkout@v4
