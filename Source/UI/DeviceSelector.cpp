@@ -13,6 +13,16 @@ namespace fs = std::filesystem;
 
 std::vector<info> get_device_options()
 {
+#if defined(OS_MACOS)
+    auto sharedDir =
+        fs::path(CoreServices::getSavedStateDirectory().getFullPathName().toStdString());
+    fs::path pluginDir = sharedDir / "plugins";
+    if (!fs::exists(pluginDir)) {
+        pluginDir = sharedDir / ("plugins-api" + std::to_string(PLUGIN_API_VER));
+        if (!fs::exists(pluginDir)) throw std::runtime_error("Shared directory not found");
+    }
+    auto device_manager_dir = pluginDir / "XDAQ-OE.bundle" / "Contents" / "PlugIns" / "managers";
+#else
     auto sharedDir =
         fs::path(CoreServices::getSavedStateDirectory().getFullPathName().toStdString());
     if (fs::exists(sharedDir / "shared"))
@@ -21,10 +31,11 @@ std::vector<info> get_device_options()
         sharedDir = sharedDir / ("shared-api" + std::to_string(PLUGIN_API_VER));
         if (!fs::exists(sharedDir)) throw std::runtime_error("Shared directory not found");
     }
+    auto device_manager_dir = sharedDir / "XDAQ-OE" / "managers";
+#endif
 
     std::vector<info> device_options;
 
-    auto device_manager_dir = sharedDir / "xdaq" / "managers";
     std::unordered_set<fs::path> search_paths;
     if (fs::exists(device_manager_dir))
         for (auto path : fs::directory_iterator(device_manager_dir))

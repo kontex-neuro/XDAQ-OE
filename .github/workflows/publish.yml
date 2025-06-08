@@ -1,0 +1,74 @@
+name: Publish XDAQ-OE
+
+on:
+    workflow_dispatch:
+    push:
+        tags:
+            - "xdaq-v*"
+
+jobs:
+    build:
+        uses: ./.github/workflows/build.yml
+
+    publish:
+        runs-on: ubuntu-24.04
+        needs: build
+
+        steps:
+            - name: Download all artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  path: dist
+
+            - name: Flatten dist folder
+              run: |
+                  find dist -name '*.zip' -exec mv {} dist/ \;
+                  find dist -mindepth 1 -type d -exec rm -rf {} +
+                  ls -la dist
+
+            - name: Upload to Artifactory
+              run: |
+                  set -e
+
+                  # Ensure this is a tag in the form xdaq-v*
+                  ref="${{ github.ref_name }}"
+                  if [[ "$ref" != xdaq-v* ]]; then
+                      echo "Not a release tag: $ref"
+                      exit 1
+                  fi
+
+                  upload_tag="${ref#xdaq-v}"
+                  api_ver="8"
+
+                  for f in dist/*.zip; do
+                      base=$(basename "$f" .zip)
+                      if [[ "$base" == windows-x86_64 ]]; then
+                          new_name="XDAQ-windows_${upload_tag}-API${api_ver}.zip"
+                      elif [[ "$base" == mac-x86_64 ]]; then
+                          new_name="XDAQ-mac_${upload_tag}-API${api_ver}.zip"
+                      else
+                          echo "Unknown platform in $base, skipping"
+                          exit 1
+                      fi
+                      mv "$f" "dist/$new_name"
+
+                      echo "Created: dist/$new_name"
+
+                      # Upload (disabled for now)
+                      if [[ "$base" == windows-x86_64 ]]; then
+                        echo curl -H "X-JFrog-Art-Api:${{ secrets.artifactoryApiKey }}" -T "dist/$new_name" \
+                          "https://openephys.jfrog.io/artifactory/XDAQ-plugin/windows/$new_name"
+                      elif [[ "$base" == mac-x86_64 ]]; then
+                        echo curl -H "X-JFrog-Art-Api:${{ secrets.artifactoryApiKey }}" -T "dist/$new_name" \
+                          "https://openephys.jfrog.io/artifactory/XDAQ-plugin/mac/$new_name"
+                      else
+                        echo "Unknown platform in $base, skipping upload"
+                        exit 1
+                      fi
+                  done
+
+            - name: Upload dist folder
+              uses: actions/upload-artifact@v4
+              with:
+                  name: dist
+                  path: dist

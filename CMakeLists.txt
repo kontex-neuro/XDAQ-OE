@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5.0)
+cmake_minimum_required(VERSION 3.25)
 cmake_policy(SET CMP0087 NEW)
 if (NOT DEFINED GUI_BASE_DIR)
 	if (DEFINED ENV{GUI_BASE_DIR})
@@ -62,6 +62,12 @@ target_compile_definitions(${PLUGIN_NAME} PRIVATE
 	PLUGIN_VERSION_PATCH=${PROJECT_VERSION_PATCH}
 )
 
+target_compile_definitions(${PLUGIN_NAME} PRIVATE
+	$<$<PLATFORM_ID:Linux>:OS_LINUX>
+	$<$<PLATFORM_ID:Windows>:OS_WINDOWS>
+	$<$<PLATFORM_ID:Darwin>:OS_MACOS>
+)
+
 target_compile_features(${PLUGIN_NAME} PUBLIC cxx_auto_type cxx_generalized_initializers)
 target_compile_options(${PLUGIN_NAME} PRIVATE $<$<PLATFORM_ID:Darwin>:-fexperimental-library>)
 target_compile_options(${PLUGIN_NAME} PRIVATE $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-Wno-deprecated-declarations>)
@@ -69,8 +75,6 @@ target_compile_options(${PLUGIN_NAME} PRIVATE $<$<CXX_COMPILER_ID:AppleClang,Cla
 
 
 target_include_directories(${PLUGIN_NAME} PUBLIC ${GUI_BASE_DIR}/JuceLibraryCode ${GUI_BASE_DIR}/JuceLibraryCode/modules ${GUI_BASE_DIR}/Plugins/Headers ${GUI_COMMONLIB_DIR}/include)
-
-set(GUI_BIN_DIR ${GUI_BASE_DIR}/Build/${CONFIGURATION_FOLDER})
 
 if (NOT CMAKE_LIBRARY_ARCHITECTURE)
 	if (CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -80,34 +84,22 @@ if (NOT CMAKE_LIBRARY_ARCHITECTURE)
 	endif()
 endif()
 
-option(INSTALL_TO_SYSTEM "Install to system instead of plugin-GUI build folder" OFF)
-
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-	if(INSTALL_TO_SYSTEM)
-		if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
-			set_property(CACHE CMAKE_INSTALL_PREFIX PROPERTY VALUE C:/ProgramData/Open\ Ephys)
-		elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
-			set_property(CACHE CMAKE_INSTALL_PREFIX PROPERTY VALUE $ENV{HOME}/Library/Application\ Support/open-ephys)
-		elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
-			message(FATAL_ERROR "Not implemented")
-		endif()
-	else()
+	if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
+		set_property(CACHE CMAKE_INSTALL_PREFIX PROPERTY VALUE C:/ProgramData/Open\ Ephys)
+		set(PLUGIN_INSTALL_DIR plugins-api9 CACHE STRING "Plugin installation directory")
+		set(SHARED_INSTALL_DIR shared-api9 CACHE STRING "Shared installation directory")
+	elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
+		set_property(CACHE CMAKE_INSTALL_PREFIX PROPERTY VALUE $ENV{HOME}/Library/Application\ Support/open-ephys)
+		set(PLUGIN_INSTALL_DIR plugins-api9 CACHE STRING "Plugin installation directory")
+		set(SHARED_INSTALL_DIR shared-api9 CACHE STRING "Shared installation directory")
+	elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
 		set_property(CACHE CMAKE_INSTALL_PREFIX PROPERTY VALUE ${GUI_BASE_DIR}/Build)
-		if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
-		elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
-			message(FATAL_ERROR "Only system install is supported on Mac")
-		elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
-		endif()
+		set(PLUGIN_INSTALL_DIR ${CONFIGURATION_FOLDER}/plugins-api9 CACHE STRING "Plugin installation directory")
+		set(SHARED_INSTALL_DIR ${CONFIGURATION_FOLDER}/shared-api9 CACHE STRING "Shared installation directory")
 	endif()
 endif()
 
-if(INSTALL_TO_SYSTEM)
-	set(PLUGIN_INSTALL_DIR plugins-api9)
-	set(SHARED_INSTALL_DIR shared-api9)
-else()
-	set(PLUGIN_INSTALL_DIR ${CONFIGURATION_FOLDER}/plugins)
-	set(SHARED_INSTALL_DIR ${CONFIGURATION_FOLDER}/shared)
-endif()
 
 # target_compile_options(${PLUGIN_NAME} PRIVATE $<$<CONFIG:Debug>:-fsanitize=address>)
 # target_link_libraries(${PLUGIN_NAME} PRIVATE $<$<CONFIG:Debug>:-fsanitize=address>)
@@ -115,18 +107,19 @@ endif()
 #Libraries and compiler options
 if(MSVC)
 	target_compile_definitions(${PLUGIN_NAME} PRIVATE NOMINMAX)
-	target_link_libraries(${PLUGIN_NAME} PRIVATE ${GUI_BIN_DIR}/open-ephys.lib)
+	target_link_libraries(${PLUGIN_NAME} PRIVATE ${GUI_BASE_DIR}/Build/${CONFIGURATION_FOLDER}/open-ephys.lib)
 	target_compile_options(${PLUGIN_NAME} PRIVATE /sdl- /W0)
 elseif(LINUX)
-	target_link_libraries(${PLUGIN_NAME} GL X11 Xext Xinerama asound dl freetype pthread rt)
-	set_property(TARGET ${PLUGIN_NAME} APPEND_STRING PROPERTY LINK_FLAGS
-		"-fvisibility=hidden -fPIC -rdynamic -Wl,-rpath='$ORIGIN/../shared' -Wl,-rpath='$ORIGIN/../shared-api9'")
-	target_compile_options(${PLUGIN_NAME} PRIVATE -fPIC -rdynamic)
-	target_compile_options(${PLUGIN_NAME} PRIVATE -O3) #enable optimization for linux debug
+	set_target_properties(${PLUGIN_NAME} PROPERTIES
+		CXX_VISIBILITY_PRESET hidden
+		POSITION_INDEPENDENT_CODE ON
+	)
+	target_link_libraries(${PLUGIN_NAME} PRIVATE GL X11 Xext Xinerama asound dl freetype pthread rt)
+	set_property(TARGET ${PLUGIN_NAME} APPEND_STRING PROPERTY LINK_FLAGS "-rdynamic")
+	target_compile_options(${PLUGIN_NAME} PRIVATE -rdynamic)
 elseif(APPLE)
 	set_target_properties(${PLUGIN_NAME} PROPERTIES BUNDLE TRUE)
-	set_property(TARGET ${PLUGIN_NAME} APPEND_STRING PROPERTY LINK_FLAGS
-	"-undefined dynamic_lookup -rpath @loader_path/../../../../shared-api9")
+	set_property(TARGET ${PLUGIN_NAME} APPEND_STRING PROPERTY LINK_FLAGS "-undefined dynamic_lookup")
 
 	set_target_properties(${PLUGIN_NAME} PROPERTIES
 		XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
@@ -134,10 +127,6 @@ elseif(APPLE)
 	)
 endif()
 
-install(TARGETS ${PLUGIN_NAME}
-	LIBRARY DESTINATION ${PLUGIN_INSTALL_DIR}
-    RUNTIME DESTINATION ${PLUGIN_INSTALL_DIR}
-)
 
 #create filters for vs and xcode
 
@@ -159,11 +148,14 @@ target_link_libraries(${PLUGIN_NAME} PRIVATE
 	nlohmann_json::nlohmann_json
 )
 
-install(DIRECTORY ${XDAQ_DEVICE_MANAGER_DIR} DESTINATION ${SHARED_INSTALL_DIR}/xdaq)
-install(DIRECTORY ${XDAQ_RESOURCES_DIR} DESTINATION ${SHARED_INSTALL_DIR}/xdaq)
 
 if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
-
+	install(TARGETS ${PLUGIN_NAME}
+		LIBRARY DESTINATION ${PLUGIN_INSTALL_DIR}
+		RUNTIME DESTINATION ${PLUGIN_INSTALL_DIR}
+	)
+	install(DIRECTORY ${XDAQ_DEVICE_MANAGER_DIR} DESTINATION ${SHARED_INSTALL_DIR}/${PLUGIN_NAME})
+	install(DIRECTORY ${XDAQ_RESOURCES_DIR} DESTINATION ${SHARED_INSTALL_DIR}/${PLUGIN_NAME})
 	set(CPACK_PACKAGE_NAME ${PLUGIN_NAME})
 	set(CPACK_PACKAGE_DIRECTORY ${CMAKE_BINARY_DIR}/package)
 
@@ -174,7 +166,27 @@ if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
 	set(CPACK_PACKAGE_VENDOR "KonteX Neuroscience")
 	string(REPLACE "/" "\\\\" CPACK_NSIS_INSTALL_ROOT ${CMAKE_INSTALL_PREFIX})
 	set(CPACK_PACKAGE_INSTALL_DIRECTORY "")
-
 	include(CPACK)
-
+elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
+	install(TARGETS ${PLUGIN_NAME}
+		LIBRARY DESTINATION ${PLUGIN_INSTALL_DIR}
+		RUNTIME DESTINATION ${PLUGIN_INSTALL_DIR}
+	)
+	install(DIRECTORY ${XDAQ_DEVICE_MANAGER_DIR}
+		DESTINATION ${PLUGIN_INSTALL_DIR}/${PLUGIN_NAME}.bundle/Contents/PlugIns
+	)
+	install(DIRECTORY ${XDAQ_RESOURCES_DIR}
+		DESTINATION ${PLUGIN_INSTALL_DIR}/${PLUGIN_NAME}.bundle/Contents/PlugIns
+	)
+	set(CPACK_GENERATOR "DragNDrop")
+	set(CPACK_DMG_DISABLE_APPLICATIONS_SYMLINK ON)
+    set(CPACK_PRE_BUILD_SCRIPTS "${CMAKE_SOURCE_DIR}/cmake/codesign.cmake")
+	include(CPACK)
+elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+	install(DIRECTORY ${XDAQ_DEVICE_MANAGER_DIR} DESTINATION ${SHARED_INSTALL_DIR}/${PLUGIN_NAME})
+	install(DIRECTORY ${XDAQ_RESOURCES_DIR} DESTINATION ${SHARED_INSTALL_DIR}/${PLUGIN_NAME})
+	install(TARGETS ${PLUGIN_NAME}
+		LIBRARY DESTINATION ${PLUGIN_INSTALL_DIR}
+		RUNTIME DESTINATION ${PLUGIN_INSTALL_DIR}
+	)
 endif()
