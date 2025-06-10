@@ -81,7 +81,7 @@ cmake -G "Xcode" ..
 
 Next, launch Xcode and open the `XDAQ-OE.xcodeproj` file that now lives in the “Build” directory.
 
-Running the `ALL_BUILD` scheme will compile the plugin; running the `INSTALL` scheme will install the `.bundle` file to `/Users/<username>/Library/Application Support/open-ephys/plugins-api9`. The XDAQ plugin should be available the next time you launch the GUI from Xcode.
+Running the `ALL_BUILD` scheme will compile the plugin; running the `INSTALL` scheme will install the `.bundle` file to `/Users/<username>/Library/Application Support/open-ephys/plugins-api10`. The XDAQ plugin should be available the next time you launch the GUI from Xcode.
 
 
 
