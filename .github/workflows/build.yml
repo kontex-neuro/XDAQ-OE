@@ -35,12 +35,13 @@ jobs:
                   echo "CC=$(brew --prefix llvm@18)/bin/clang" >> $GITHUB_ENV
                   echo "CXX=$(brew --prefix llvm@18)/bin/clang++" >> $GITHUB_ENV
 
-            - name: Setup Compiler (Ubuntu 22)
+            - name: Setup Compiler and dependencies (Ubuntu 22.04)
               if: matrix.os == 'ubuntu-22.04'
               run: |
                 sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
                 sudo apt-get update -y
-                sudo apt-get install gcc-13 g++-13 -y
+                sudo apt-get install -y freeglut3-dev libfreetype*-dev libxinerama-dev libxcursor-dev libasound2-dev libxrandr-dev libcurl4-openssl-dev
+                sudo apt-get install -y gcc-13 g++-13
                 echo "CC=gcc-13" >> $GITHUB_ENV
                 echo "CXX=g++-13" >> $GITHUB_ENV
 
