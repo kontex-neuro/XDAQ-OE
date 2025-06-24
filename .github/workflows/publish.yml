@@ -54,16 +54,20 @@ jobs:
 
                       echo "Created: dist/$new_name"
 
-                      # Upload (disabled for now)
-                      if [[ "$base" == windows-x86_64 ]]; then
-                        echo curl -H "X-JFrog-Art-Api:${{ secrets.artifactoryApiKey }}" -T "dist/$new_name" \
-                          "https://openephys.jfrog.io/artifactory/XDAQ-plugin/windows/$new_name"
-                      elif [[ "$base" == mac-x86_64 ]]; then
-                        echo curl -H "X-JFrog-Art-Api:${{ secrets.artifactoryApiKey }}" -T "dist/$new_name" \
-                          "https://openephys.jfrog.io/artifactory/XDAQ-plugin/mac/$new_name"
+                      # Upload to Artifactory if the API key is set
+                      if [[ -n "${{ secrets.artifactoryApiKey }}" ]]; then
+                          if [[ "$base" == windows-x86_64 ]]; then
+                              curl -H "X-JFrog-Art-Api:${{ secrets.artifactoryApiKey }}" -T "dist/$new_name" \
+                              "https://openephys.jfrog.io/artifactory/XDAQ-plugin/windows/$new_name"
+                          elif [[ "$base" == mac-x86_64 ]]; then
+                              curl -H "X-JFrog-Art-Api:${{ secrets.artifactoryApiKey }}" -T "dist/$new_name" \
+                              "https://openephys.jfrog.io/artifactory/XDAQ-plugin/mac/$new_name"
+                          else
+                              echo "Unknown platform in $base, skipping upload"
+                              exit 1
+                          fi
                       else
-                        echo "Unknown platform in $base, skipping upload"
-                        exit 1
+                          echo "No Artifactory API key set, skipping upload"
                       fi
                   done
 
