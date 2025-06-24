@@ -14,7 +14,7 @@ jobs:
                       base_name: windows-x86_64
                     - os: macos-15
                       arch: arm64
-                      base_name: mac-x86_64
+                      base_name: mac-arm64
                     - os: ubuntu-22.04
                       arch: x64
                       base_name: linux-x86_64
