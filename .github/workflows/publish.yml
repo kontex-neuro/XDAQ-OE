@@ -38,14 +38,16 @@ jobs:
                   fi
 
                   upload_tag="${ref#xdaq-v}"
-                  api_ver="8"
+                  api_ver="10"
 
                   for f in dist/*.zip; do
                       base=$(basename "$f" .zip)
                       if [[ "$base" == windows-x86_64 ]]; then
                           new_name="XDAQ-windows_${upload_tag}-API${api_ver}.zip"
-                      elif [[ "$base" == mac-x86_64 ]]; then
+                      elif [[ "$base" == mac-arm64 ]]; then
                           new_name="XDAQ-mac_${upload_tag}-API${api_ver}.zip"
+                      elif [[ "$base" == linux-x86_64 ]]; then
+                          new_name="XDAQ-linux_${upload_tag}-API${api_ver}.zip"
                       else
                           echo "Unknown platform in $base, skipping"
                           exit 1
@@ -54,20 +56,18 @@ jobs:
 
                       echo "Created: dist/$new_name"
 
-                      # Upload to Artifactory if the API key is set
-                      if [[ -n "${{ secrets.artifactoryApiKey }}" ]]; then
-                          if [[ "$base" == windows-x86_64 ]]; then
-                              curl -H "X-JFrog-Art-Api:${{ secrets.artifactoryApiKey }}" -T "dist/$new_name" \
-                              "https://openephys.jfrog.io/artifactory/XDAQ-plugin/windows/$new_name"
-                          elif [[ "$base" == mac-x86_64 ]]; then
-                              curl -H "X-JFrog-Art-Api:${{ secrets.artifactoryApiKey }}" -T "dist/$new_name" \
-                              "https://openephys.jfrog.io/artifactory/XDAQ-plugin/mac/$new_name"
-                          else
-                              echo "Unknown platform in $base, skipping upload"
-                              exit 1
-                          fi
+                      # Upload
+                      if [[ "$base" == windows-x86_64 ]]; then
+                        curl -H "X-JFrog-Art-Api:${{ secrets.artifactoryApiKey }}" -T "dist/$new_name" \
+                          "https://openephys.jfrog.io/artifactory/XDAQ-plugin/windows/$new_name"
+                      elif [[ "$base" == mac-arm64 ]]; then
+                        curl -H "X-JFrog-Art-Api:${{ secrets.artifactoryApiKey }}" -T "dist/$new_name" \
+                          "https://openephys.jfrog.io/artifactory/XDAQ-plugin/mac/$new_name"
+                      elif [[ "$base" == linux-x86_64 ]]; then
+                        curl -H "X-JFrog-Art-Api:${{ secrets.artifactoryApiKey }}" -T "dist/$new_name" \
+                          "https://openephys.jfrog.io/artifactory/XDAQ-plugin/linux/$new_name"
                       else
-                          echo "No Artifactory API key set, skipping upload"
+                        echo "No Artifactory API key set, skipping upload"
                       fi
                   done
 
