@@ -33,13 +33,11 @@ jobs:
                   fi
                   unzip -q dist/mac-arm64/mac-arm64.zip -d dist/mac-arm64
                   unzip -q dist/mac-x86_64/mac-x86_64.zip -d dist/mac-x86_64
-                  # extract API version from the bundle folder name
-                  api_ver=$(basename dist/mac-arm64/plugins-api* | sed 's/plugins-api//')
 
                   ./scripts/merge_universal.sh \
-                      dist/mac-arm64/plugins-api${api_ver}/XDAQ-OE.bundle \
-                      dist/mac-x86_64/plugins-api${api_ver}/XDAQ-OE.bundle \
-                      dist/mac-universal/plugins-api${api_ver}/XDAQ-OE.bundle
+                      dist/mac-arm64/plugins/XDAQ-OE.bundle \
+                      dist/mac-x86_64/plugins/XDAQ-OE.bundle \
+                      dist/mac-universal/plugins/XDAQ-OE.bundle
                   7za a dist/mac-universal.zip ./dist/mac-universal/*
 
             - name: Upload merged macOS bundle
@@ -53,6 +51,17 @@ jobs:
         needs: [merge_macos]
 
         steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Extract API Version
+              run: |
+                  set -e
+                  git submodule update --init
+                  echo PLUGIN_API=$(grep plugin-GUI/Source/Processors/PluginManager/OpenEphysPlugin.h \
+                    -e '#define PLUGIN_API_VER' | \
+                    sed -E 's/^#define[[:space:]]+PLUGIN_API_VER[[:space:]]+([0-9]+)/\1/') >> $GITHUB_ENV
+
             - name: Download all artifacts
               uses: actions/download-artifact@v4
               with:
@@ -76,7 +85,7 @@ jobs:
                   fi
 
                   upload_tag="${ref#xdaq-v}"
-                  api_ver="10"
+                  api_ver="$PLUGIN_API"
 
                   if [[ -z dist/windows-x86_64 ]]; then
                         echo "Missing dist/windows-x86_64"
