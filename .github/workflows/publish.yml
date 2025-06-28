@@ -175,16 +175,16 @@ jobs:
                   mv dist/linux-x86_64.zip dist/$linux_new_name
                   echo "Created: dist/$linux_new_name"
 
-                  if [[ -z "${{ secrets.artifactoryApiKey }}" ]]; then
+                  if [[ -z "${{ secrets.ARTIFACTORY_ACCESS_TOKEN  }}" ]]; then
                       echo "No Artifactory API key set, skipping upload"
                       exit 0
                   fi
 
-                  curl -H "X-JFrog-Art-Api:${{ secrets.artifactoryApiKey }}" -T "dist/$win_new_name" \
+                  curl -H "X-JFrog-Art-Api:${{ secrets.ARTIFACTORY_ACCESS_TOKEN }}" -T "dist/$win_new_name" \
                     "https://openephys.jfrog.io/artifactory/XDAQ-plugin/windows/$win_new_name"
-                  curl -H "X-JFrog-Art-Api:${{ secrets.artifactoryApiKey }}" -T "dist/$mac_new_name" \
+                  curl -H "X-JFrog-Art-Api:${{ secrets.ARTIFACTORY_ACCESS_TOKEN }}" -T "dist/$mac_new_name" \
                     "https://openephys.jfrog.io/artifactory/XDAQ-plugin/mac/$mac_new_name"
-                  curl -H "X-JFrog-Art-Api:${{ secrets.artifactoryApiKey }}" -T "dist/$linux_new_name" \
+                  curl -H "X-JFrog-Art-Api:${{ secrets.ARTIFACTORY_ACCESS_TOKEN }}" -T "dist/$linux_new_name" \
                     "https://openephys.jfrog.io/artifactory/XDAQ-plugin/linux/$linux_new_name"
 
             - name: Upload dist folder
