@@ -108,7 +108,7 @@ public:
     ChannelNamingScheme getNamingScheme();
 
     /** Allow the thread to respond to messages sent by other plugins */
-    void handleBroadcastMessage (const String& msg, const int64 messageTimeMilliseconds) override;
+    void handleBroadcastMessage(const String &msg, const int64 messageTimeMilliseconds) override;
 
     /** Informs the DataThread about whether to expect saved settings to be loaded*/
     void initialize(bool signalChainIsLoading) override;
@@ -196,7 +196,6 @@ public:
     const std::vector<Headstage> &get_headstages() const { return headstages; }
 
     bool expander_present() const { return evalBoard->expander_present(); }
-    bool set_dio32(bool enable) { return evalBoard->set_dio32(enable); }
 
     std::string serial_number;
     std::string xdaq_model_name;

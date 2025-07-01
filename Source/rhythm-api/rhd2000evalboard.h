@@ -40,11 +40,10 @@
 
 #include <chrono>
 #include <cstdint>
+#include <expected>
 #include <mutex>
 #include <optional>
-#include <queue>
 #include <string>
-#include <expected>
 
 #include "ports.h"
 #include "rhd2000datablock.h"
@@ -186,7 +185,7 @@ public:
     template <typename Unit>
     std::size_t get_sample_size()
     {
-        return sample_size<Unit>(numDataStreams, CHANNELS_PER_STREAM, dio32);
+        return sample_size<Unit>(numDataStreams, CHANNELS_PER_STREAM);
     }
 
     std::expected<Rhd2000DataBlock, std::string> run_and_read_samples(
@@ -198,9 +197,6 @@ public:
     void setDacRerefSource(int stream, int channel);
     void enableDacReref(bool enabled);
 
-    // kontexdev
-    bool set_dio32(bool dio32);
-    bool get_dio32() const { return dio32; }
     bool expander_present() const { return expander; }
     bool UploadDACData(const std::vector<uint16_t> &commandList, int dacChannel, int length);
 
@@ -221,6 +217,7 @@ public:
     }
 
     xdaq::DeviceManager::OwnedDevice dev;
+
 private:
     const int samples_per_block = SAMPLES_PER_DATA_BLOCK;
     long read_raw_samples(int samples, unsigned char *buffer);
@@ -229,7 +226,6 @@ private:
 
     bool expander = false;
 
-    bool dio32 = true;
     SampleRate sampleRate = SampleRate::s30000Hz;
     int numDataStreams = 0;  // total number of data streams currently enabled
     int dataStreamEnabled[MAX_NUM_DATA_STREAMS] = {0};  // 0 (disabled) or 1 (enabled)
@@ -238,10 +234,6 @@ private:
 
     // Methods in this class are designed to be thread-safe.  This variable is used to ensure that.
     std::mutex okMutex;
-
-    // Buffer for reading bytes from USB interface
-    std::vector<unsigned char> usbBuffer;
-    std::string opalKellyModelName(int model) const;
 
 
     bool isDcmProgDone() const;

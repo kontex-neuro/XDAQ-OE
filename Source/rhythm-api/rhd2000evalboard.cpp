@@ -145,15 +145,6 @@ bool Rhd2000EvalBoard::UploadDACData(const vector<uint16_t> &commandList, int da
 }
 
 
-bool Rhd2000EvalBoard::set_dio32(bool dio32)
-{
-    lock_guard<mutex> lockOk(okMutex);
-    dev->set_register_sync(Enable32bitDIO, dio32 * 0x04, 0x04);
-    // this->dio32 = dio32;
-    return dio32;
-}
-
-
 Rhd2000EvalBoard::XDAQStatus Rhd2000EvalBoard::getXDAQStatus()
 {
     auto value = dev->get_register_sync(WireOutXDAQStatus).value();
@@ -176,12 +167,7 @@ Rhd2000EvalBoard::XDAQStatus Rhd2000EvalBoard::getXDAQStatus()
 
 // Constructor.  Set sampling rate variable to 30.0 kS/s/channel (FPGA default).
 Rhd2000EvalBoard::Rhd2000EvalBoard()
-    : usbBuffer(MAX_NUM_BLOCKS * SAMPLES_PER_DATA_BLOCK *
-                max_sample_size<char, uint16_t>(MAX_NUM_DATA_STREAMS))
 {
-    cout << "---- KonteX RhythmX USBC Controller v1.0 ----\n\n";
-    cout << "Rhd2000EvalBoard: Allocating " << usbBuffer.size() / 1.0e6
-         << " MBytes for USB buffer.\n";
     cableDelay.resize(ports.num_of_spi);
     chips.resize(ports.max_chips);
 }
@@ -1091,8 +1077,8 @@ std::expected<Rhd2000DataBlock, std::string> Rhd2000EvalBoard::run_and_read_samp
                                               sample_size * samples - buffer.size(), event.length),
                                       std::back_inserter(buffer));
                             if (buffer.size() == sample_size * samples) {
-                                result_promise->set_value(Rhd2000DataBlock(numDataStreams, samples,
-                                                                           dio32, buffer.data()));
+                                result_promise->set_value(
+                                    Rhd2000DataBlock(numDataStreams, samples, buffer.data()));
                                 result_promise.reset();
                             }
                         } else {

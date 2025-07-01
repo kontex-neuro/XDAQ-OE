@@ -969,7 +969,6 @@ bool DeviceThread::startAcquisition()
 
     evalBoard->flush();
     evalBoard->setContinuousRunMode(true);
-    evalBoard->set_dio32(true);
 
 
     startThread();

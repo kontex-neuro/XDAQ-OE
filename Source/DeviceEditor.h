@@ -101,7 +101,6 @@ private:
     ScopedPointer<UtilityButton> rescanButton, dacTTLButton;
     ScopedPointer<UtilityButton> auxButton;
     ScopedPointer<UtilityButton> adcButton;
-    std::unique_ptr<UtilityButton> dio32_button;
 
     ScopedPointer<UtilityButton> dspoffsetButton;
     ScopedPointer<ComboBox> ttlSettleCombo, dacHPFcombo;

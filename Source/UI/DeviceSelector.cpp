@@ -55,6 +55,8 @@ std::vector<info> get_device_options()
                 auto device = device_manager->create_device(device_config.dump());
                 const auto info_str = device->get_info();
                 fmt::print("Info: {}\n", info_str.value_or("N/A"));
+                const auto status_str = device->get_status();
+                fmt::print("Status: {}\n", status_str.value_or("N/A"));
                 device_options.push_back({
                     .device_manager_path = path.generic_string(),
                     .display_name = device_manager_info["name"].get<std::string>(),

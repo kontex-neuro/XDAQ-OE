@@ -23,6 +23,8 @@
 
 #include "DeviceEditor.h"
 
+#include <fmt/format.h>
+
 #include <charconv>
 #include <cmath>
 
@@ -321,9 +323,6 @@ void DeviceEditor::startAcquisition()
     auxButton->setEnabledState(false);
     adcButton->setEnabledState(false);
     dspoffsetButton->setEnabledState(false);
-    if (dio32_button) {
-        dio32_button->setEnabledState(false);
-    }
 
     acquisitionIsActive = true;
 }
@@ -335,9 +334,6 @@ void DeviceEditor::stopAcquisition()
     auxButton->setEnabledState(true);
     adcButton->setEnabledState(true);
     dspoffsetButton->setEnabledState(true);
-    if (dio32_button) {
-        dio32_button->setEnabledState(true);
-    }
 
     acquisitionIsActive = false;
 }
@@ -361,7 +357,6 @@ void DeviceEditor::saveVisualizerEditorParameters(XmlElement *xml)
     xml->setAttribute("save_impedance_measurements", saveImpedances);
     xml->setAttribute("auto_measure_impedances", measureWhenRecording);
     xml->setAttribute("ClockDivideRatio", clockInterface->getClockDivideRatio());
-    if (dio32_button) xml->setAttribute("DIO32", dio32_button->getToggleState());
 
     // loop through all headstage options interfaces and save their parameters
     for (int i = 0; i < 4; i++) {
@@ -396,8 +391,6 @@ void DeviceEditor::loadVisualizerEditorParameters(XmlElement *xml)
     saveImpedances = xml->getBoolAttribute("save_impedance_measurements");
     measureWhenRecording = xml->getBoolAttribute("auto_measure_impedances");
     clockInterface->setClockDivideRatio(xml->getIntAttribute("ClockDivideRatio"));
-    if (dio32_button)
-        dio32_button->setToggleState(xml->getBoolAttribute("DIO32"), sendNotification);
 
     leftAudioOutSelect->setText(xml->getStringAttribute("AudioOutputL", "L"),
                                 juce::sendNotification);
