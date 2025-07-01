@@ -23,6 +23,8 @@
 
 #include "ImpedanceMeter.h"
 
+#include <fmt/format.h>
+
 #include "rhythm-api/rhd2000datablock.h"
 #include "rhythm-api/rhd2000evalboard.h"
 
@@ -223,42 +225,17 @@ void ImpedanceMeter::run()
 
 std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
 {
-    // Impedances impedances;
-    // int numdataStreams = board->evalBoard->getNumEnabledDataStreams();
-    // for (int s = 0; s < board->evalBoard->ports.max_streams; ++s) {
-    //     if (!board->evalBoard->isStreamEnabled(s)) continue;
-    //     auto &chip = board->evalBoard->get_chips()[s / 2];
-    //     if (chip.id != IntanChip::ChipID::RHD2164) {
-    //         impedances.stream_indices.push_back(s);
-    //         impedances.magnitudes_by_stream.emplace_back(32, s * 1000 + 0.1);
-    //         impedances.phases_by_stream.emplace_back();
-    //         for (int c = 0; c < 32; ++c)
-    //             impedances.phases_by_stream.back().push_back(-0.01 * c - 1);
-    //     } else {
-    //         impedances.stream_indices.push_back(s);
-    //         impedances.magnitudes_by_stream.emplace_back(32, s * 1000 + 0.2);
-    //         impedances.phases_by_stream.emplace_back();
-    //         for (int c = 0; c < 32; ++c)
-    //             impedances.phases_by_stream.back().push_back(-0.01 * c - 2);
-    //     }
-    // }
-    // return impedances;
     setProgress(0.0f);
 
-    int numdataStreams = board->evalBoard->getNumEnabledDataStreams();
-
-    bool rhd2164ChipPresent = false;
-
-    std::vector<int> enabledStreams;
-
-    for (int stream = 0; stream < MAX_NUM_DATA_STREAMS; ++stream) {
-        if (board->evalBoard->isStreamEnabled(stream)) {
-            enabledStreams.push_back(stream);
-        }
-
-        if (board->chipId[stream] == CHIP_ID_RHD2164_B) {
-            rhd2164ChipPresent = true;
-        }
+    struct streaminfo {
+        int index;
+        bool isddr;
+    };
+    std::vector<streaminfo> streaminfos;
+    for (int i = 0; i < board->evalBoard->ports.max_streams; ++i) {
+        if (!board->evalBoard->isStreamEnabled(i)) continue;
+        bool ddr = board->evalBoard->ports.is_ddr(i);
+        streaminfos.push_back({i, ddr});
     }
 
     bool validImpedanceFreq;
@@ -321,8 +298,6 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
     CHECK_EXIT;
     board->evalBoard->setContinuousRunMode(false);
     board->evalBoard->setMaxTimeStep(SAMPLES_PER_DATA_BLOCK * numBlocks);
-    std::vector<unsigned char> buffer(SAMPLES_PER_DATA_BLOCK * numBlocks *
-                                      board->evalBoard->get_sample_size<char>());
 
     // Create matrices of doubles of size (numStreams x 32 x 3) to store complex amplitudes
     // of all amplifier channels (32 on each data stream) at three different Cseries values.
@@ -359,7 +334,7 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
         }
 
         // Check all 32 channels across all active data streams.
-        for (int channel = 0; channel < 32 + (32 * rhd2164ChipPresent); ++channel) {
+        for (int channel = 0; channel < 64; ++channel) {
             CHECK_EXIT;
 
             board->chipRegisters.setZcheckChannel(channel);
@@ -373,13 +348,12 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
                 return std::nullopt;
             }
 
-            for (int stream = 0; stream < numdataStreams; ++stream) {
-                setProgress(float(capRange) / 3.0f +
-                            (float(channel) / (32 + 32 * rhd2164ChipPresent) / 3.0f) +
-                            (float(stream) / float(numdataStreams) / 32.0f / 3.0f));
-
+            setProgress(capRange / 3.0 + (channel / 64.0 / 3.0));
+            for (int stream = 0; stream < res.value().num_streams; ++stream) {
+                if (streaminfos[stream].isddr != (channel >= 32)) continue;
                 const auto r = measureComplexAmplitude(
-                    {&res.value().amp[(stream * 32 + channel) * SAMPLES_PER_DATA_BLOCK * numBlocks],
+                    {&res.value()
+                          .amp[(stream * 32 + (channel % 32)) * SAMPLES_PER_DATA_BLOCK * numBlocks],
                      static_cast<std::size_t>(SAMPLES_PER_DATA_BLOCK * numBlocks)},
                     numBlocks, board->settings.boardSampleRate, actualImpedanceFreq, numPeriods);
                 measuredMagnitude[stream][channel % 32][capRange] = std::abs(r);
@@ -399,7 +373,7 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
         14.0e-12;  // 14 pF: an estimate of on-chip parasitic capacitance,
     // including 10 pF of amplifier input capacitance.
     for (int stream = 0; stream < board->evalBoard->getNumEnabledDataStreams(); ++stream) {
-        impedances.stream_indices.push_back(enabledStreams[stream]);
+        impedances.stream_indices.push_back(streaminfos[stream].index);
         impedances.magnitudes_by_stream.push_back(std::vector<float>());
         impedances.phases_by_stream.push_back(std::vector<float>());
         for (int channel = 0; channel < 32; ++channel) {
