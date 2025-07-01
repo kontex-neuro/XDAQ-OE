@@ -11,20 +11,19 @@ constexpr int CHANNELS_PER_STREAM = 32;
 constexpr std::uint64_t RHD2000_HEADER_MAGIC_NUMBER = 0xd7a22aaa38132a53;
 
 template <typename Unit>
-std::size_t sample_size(int streams, int channels_per_stream)
+std::size_t sample_size(int streams, int channels_per_stream, bool device_timestamp)
 {
     // magic number 8 bytes; time stamp 4 bytes;
     // (amp channels + 3 aux commands) * size of amp
-    int sample_size = 8 + 4 + (streams * (channels_per_stream + 3) * sizeof(std::uint16_t));
+    int sample_size = 8 + 8 + 4 + (streams * (channels_per_stream + 3) * sizeof(std::uint16_t));
     // 0-3 filler words; ADCs 8 * 2 bytes; TTL in/out 16+16 bits or 32+32 bits
-    sample_size += ((streams + 2) % 4) * 2 + 16 + 8;
+    sample_size += ((streams + 2) % 4) * 2 + 8 * device_timestamp + 16 + 8;
     return sample_size / sizeof(Unit);
 }
 
 
-template <std::uint64_t Magic,
-          auto &as_ts,      // always uint32_t but keep for consistency
-          auto &cast_ts_f,  // cast to desired type, OE use int64_t
+template <std::uint64_t Magic, auto &as_ts,
+          auto &cast_ts_f,                                  // cast to desired type, OE use int64_t
           auto &as_amp, auto &cast_amp_f, auto &amp_index,  // deseralize and cast ampifier data
           auto &as_adc, auto &cast_adc_f, auto &adc_index>
 class DataBlock
@@ -42,19 +41,20 @@ public:
     const int num_adc = 8;
     // const int num_aux = 3;
 
-    // TODO: upgrade to std::span when C++20 is more commonly available to avoid copying data
     std::vector<ts_t> timeStamp;
+    std::vector<std::uint64_t> device_timestamp;
     std::vector<std::vector<std::uint16_t>> aux;
     std::vector<amp_t> amp;
     std::vector<adc_t> adc;
     std::vector<std::uint32_t> ttlIn;
     std::vector<std::uint32_t> ttlOut;
 
-    DataBlock(int numDataStreams, int num_samples = SAMPLES_PER_DATA_BLOCK,
-              const unsigned char *buffer = nullptr)
+    DataBlock(int numDataStreams, int num_samples, const unsigned char *buffer,
+              bool has_device_timestamp)
         : num_samples(num_samples),
           num_streams(numDataStreams),
           timeStamp(num_samples),
+          device_timestamp(has_device_timestamp ? num_samples : 0),
           amp(numDataStreams * CHANNELS_PER_STREAM * num_samples),
           adc(num_samples * 8),
           ttlIn(num_samples),
@@ -62,10 +62,10 @@ public:
     {
         for (int i = 0; i < 3; ++i) aux.emplace_back(numDataStreams * num_samples);
 
-        if (buffer != nullptr) from_buffer(buffer);
+        if (buffer != nullptr) from_buffer(buffer, has_device_timestamp);
     }
 
-    bool from_buffer(const unsigned char *buffer)
+    bool from_buffer(const unsigned char *buffer, bool has_device_timestamp)
     {
         using namespace utils::endian;
         for (int t = 0; t < num_samples; ++t) {
@@ -92,6 +92,10 @@ public:
             }
             // skip filler words in each data stream
             buffer += 2 * ((num_streams + 2) % 4);
+            if (has_device_timestamp) {
+                device_timestamp[t] = little2host64(buffer);
+                buffer += 8;
+            }
             // Read from ADCs
             for (int i = 0; i < num_adc; ++i) {
                 adc[adc_index(num_samples, num_adc, t, i)] = cast_adc_f(as_adc(buffer));

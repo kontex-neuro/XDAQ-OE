@@ -195,10 +195,13 @@ public:
     const Ports &get_ports() const { return evalBoard->ports; }
     const std::vector<Headstage> &get_headstages() const { return headstages; }
 
-    bool expander_present() const { return evalBoard->expander_present(); }
-
     std::string serial_number;
     std::string xdaq_model_name;
+
+    void set_xdaq_timestamp(bool use_xdaq_timestamp)
+    {
+        this->use_xdaq_timestamp = use_xdaq_timestamp;
+    }
 
 private:
     std::optional<std::unique_ptr<xdaq::DeviceManager::OwnedDevice::element_type::DataStream>>
@@ -210,8 +213,7 @@ private:
 
     // void setCableLength(int hsNum, float length);
 
-    /** Rhythm API classes*/
-    ScopedPointer<Rhd2000EvalBoard> evalBoard;
+    std::unique_ptr<Rhd2000EvalBoard> evalBoard;
     Rhd2000Registers chipRegisters;
 
     /** Custom classes*/
@@ -312,6 +314,8 @@ private:
     StringArray channelNames;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DeviceThread);
+
+    bool use_xdaq_timestamp = false;
 };
 
 }  // namespace RhythmNode

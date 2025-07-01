@@ -19,17 +19,13 @@
 //----------------------------------------------------------------------------------
 #pragma once
 
-#define RHYTHM_BOARD_ID 700
 #define MAX_NUM_DATA_STREAMS 32
 #define MAX_NUM_SPI_PORTS 8
-#define RHD_BOARD_MODE 13
 
 // The maximum number of Rhd2000DataBlockUsb3 objects we will need is set by the need
 // to perform electrode impedance measurements at very low frequencies.
 // (Maximum command length = 1024 for one period; seven periods required in worst case.)
 #define MAX_NUM_BLOCKS 57
-
-#define FIFO_CAPACITY_WORDS 67108864
 
 #define USB3_BLOCK_SIZE 1024
 #define RAM_BURST_SIZE 32
@@ -52,8 +48,11 @@
 class Rhd2000EvalBoard
 {
 public:
+    using Device = typename xdaq::DeviceManager::OwnedDevice;
     Ports ports = XDAQPortRHD();
-    Rhd2000EvalBoard();
+    Rhd2000EvalBoard(Device dev, bool has_device_timestamp, bool has_expander);
+    Rhd2000EvalBoard(const Rhd2000EvalBoard &) = delete;
+    Rhd2000EvalBoard &operator=(const Rhd2000EvalBoard &) = delete;
 
     ~Rhd2000EvalBoard();
 
@@ -64,7 +63,6 @@ public:
     }
 
 
-    int open(xdaq::DeviceManager::OwnedDevice dev);
     void initialize();
 
     // int FPGA_board;
@@ -121,8 +119,6 @@ public:
     void selectAuxCommandBank(SPIPort port, AuxCmdSlot auxCommandSlot, int bank);
     void selectAuxCommandLength(AuxCmdSlot auxCommandSlot, int loopIndex, int endIndex);
 
-    void resetBoard();
-    void resetFpga();
     void setContinuousRunMode(bool continuousMode);
     void setMaxTimeStep(unsigned int maxTimeStep);
     void run();
@@ -146,7 +142,6 @@ public:
 
     void setDacManual(int value);
 
-    void setLedDisplay(int ledArray[]);
     void setSpiLedDisplay(int ledArray[]);
 
     void enableDac(int dacChannel, bool enabled);
@@ -185,19 +180,17 @@ public:
     template <typename Unit>
     std::size_t get_sample_size()
     {
-        return sample_size<Unit>(numDataStreams, CHANNELS_PER_STREAM);
+        return sample_size<Unit>(numDataStreams, CHANNELS_PER_STREAM, has_device_timestamp);
     }
 
     std::expected<Rhd2000DataBlock, std::string> run_and_read_samples(
         int samples, std::optional<std::chrono::milliseconds> timeout = std::nullopt);
 
     int getCableDelay(SPIPort port) const;
-    void getCableDelay(std::vector<int> &delays) const;
 
     void setDacRerefSource(int stream, int channel);
     void enableDacReref(bool enabled);
 
-    bool expander_present() const { return expander; }
     bool UploadDACData(const std::vector<uint16_t> &commandList, int dacChannel, int length);
 
     enum class XDAQStatus : uint8_t {
@@ -206,7 +199,6 @@ public:
         MCU_DONE = 0x08,
         MCU_ERROR = 0x10
     };
-    XDAQStatus getXDAQStatus();
     bool isStreamEnabled(int stream) const { return dataStreamEnabled[stream]; }
     const std::vector<IntanChip::Chip> &scan_chips();
     const std::vector<IntanChip::Chip> &get_chips() const { return chips; }
@@ -216,15 +208,13 @@ public:
         return estimateCableLengthMeters(cableDelay[static_cast<int>(port)]);
     }
 
-    xdaq::DeviceManager::OwnedDevice dev;
+    Device dev;
+    const bool has_device_timestamp;
+    const bool has_expander;
 
 private:
     const int samples_per_block = SAMPLES_PER_DATA_BLOCK;
-    long read_raw_samples(int samples, unsigned char *buffer);
 
-    bool is_open = false;
-
-    bool expander = false;
 
     SampleRate sampleRate = SampleRate::s30000Hz;
     int numDataStreams = 0;  // total number of data streams currently enabled
@@ -232,10 +222,5 @@ private:
     std::vector<int> cableDelay;
     std::vector<IntanChip::Chip> chips;
 
-    // Methods in this class are designed to be thread-safe.  This variable is used to ensure that.
     std::mutex okMutex;
-
-
-    bool isDcmProgDone() const;
-    bool isDataClockLocked() const;
 };

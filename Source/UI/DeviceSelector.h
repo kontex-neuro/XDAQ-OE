@@ -11,6 +11,7 @@ struct info {
     std::string display_name;
     json device_config;
     json device_info;
+    json device_status;
 };
 
 std::vector<info> get_device_options();

@@ -123,6 +123,18 @@ constexpr int WireInDacSource[] = {OkEndPoint::WireInDacSource1, OkEndPoint::Wir
                                    OkEndPoint::WireInDacSource5, OkEndPoint::WireInDacSource6,
                                    OkEndPoint::WireInDacSource7, OkEndPoint::WireInDacSource8};
 
+// Is variable-frequency clock DCM programming done?
+bool is_dcm_prog_done(Rhd2000EvalBoard::Device &dev)
+{
+    return (dev->get_register_sync(WireOutDataClkLocked).value() & 0x0002) > 0;
+}
+
+// Is variable-frequency clock PLL locked?
+bool is_data_clock_locked(Rhd2000EvalBoard::Device &dev)
+{
+    return (dev->get_register_sync(WireOutDataClkLocked).value() & 0x0001) > 0;
+}
+
 bool Rhd2000EvalBoard::UploadDACData(const vector<uint16_t> &commandList, int dacChannel,
                                      int length)
 {
@@ -145,56 +157,24 @@ bool Rhd2000EvalBoard::UploadDACData(const vector<uint16_t> &commandList, int da
 }
 
 
-Rhd2000EvalBoard::XDAQStatus Rhd2000EvalBoard::getXDAQStatus()
-{
-    auto value = dev->get_register_sync(WireOutXDAQStatus).value();
-    auto is_stat = [](auto v, XDAQStatus s) {
-        return (v & static_cast<uint8_t>(s)) == static_cast<uint8_t>(s);
-    };
-
-    if (is_stat(value, XDAQStatus::MCU_BUSY)) {
-        return XDAQStatus::MCU_BUSY;
-    } else if (is_stat(value, XDAQStatus::MCU_ERROR)) {
-        return XDAQStatus::MCU_ERROR;
-    } else if (is_stat(value, XDAQStatus::MCU_DONE)) {
-        return XDAQStatus::MCU_DONE;
-    } else if (value == 0) {
-        return XDAQStatus::MCU_IDLE;
-    }
-    return XDAQStatus::MCU_BUSY;
-}
-
-
 // Constructor.  Set sampling rate variable to 30.0 kS/s/channel (FPGA default).
-Rhd2000EvalBoard::Rhd2000EvalBoard()
+Rhd2000EvalBoard::Rhd2000EvalBoard(Device dev, bool has_device_timestamp, bool has_expander)
+    : has_device_timestamp(has_device_timestamp), has_expander(has_expander), dev(std::move(dev))
 {
     cableDelay.resize(ports.num_of_spi);
     chips.resize(ports.max_chips);
+    if (has_device_timestamp) this->dev->set_register_sync(0x1530u, 1, 1);
 }
 
 Rhd2000EvalBoard::~Rhd2000EvalBoard()
 {
-    if (is_open) {
-        std::array<int, 8> led = {0, 0, 0, 0, 0, 0, 0, 0};
-        setSpiLedDisplay(&led[0]);
-        resetFpga();
-    }
-}
-
-// Find an Opal Kelly XEM6310-LX45 board attached to a USB port and open it.
-// Returns 1 if successful, -1 if FrontPanel cannot be loaded, and -2 if XEM6310 can't be found.
-int Rhd2000EvalBoard::open(xdaq::DeviceManager::OwnedDevice dev)
-{
-    this->dev = std::move(dev);
-    expander = true;
-    is_open = true;
-    return 1;
+    std::array<int, 8> led = {0, 0, 0, 0, 0, 0, 0, 0};
+    setSpiLedDisplay(&led[0]);
 }
 
 // Initialize Rhythm FPGA to default starting values.
 void Rhd2000EvalBoard::initialize()
 {
-    resetBoard();
     setSampleRate(SampleRate::s30000Hz);
     selectAuxCommandBank(SPIPort::All, AuxCmdSlot::All, 0);
     selectAuxCommandLength(AuxCmdSlot::All, 0, 0);
@@ -375,14 +355,14 @@ bool Rhd2000EvalBoard::setSampleRate(SampleRate newSampleRate)
     sampleRate = newSampleRate;
 
     // Wait for DcmProgDone = 1 before reprogramming clock synthesizer
-    while (isDcmProgDone() == false);
+    while (is_dcm_prog_done(dev) == false);
 
     // Reprogram clock synthesizer
     dev->set_register_sync(WireInDataFreqPll, (256 * M + D));
     dev->trigger(TrigInConfig, 0);
 
     // Wait for DataClkLocked = 1 before allowing data acquisition to continue
-    while (isDataClockLocked() == false);
+    while (is_data_clock_locked(dev) == false);
 
     return true;
 }
@@ -491,19 +471,6 @@ void Rhd2000EvalBoard::selectAuxCommandLength(AuxCmdSlot auxCommandSlot, int loo
         dev->set_register(WireInAuxCmdLoop, loopIndex << aux * 10, 0x3ff << aux * 10);
         dev->set_register_sync(WireInAuxCmdLength, endIndex << aux * 10, 0x3ff << aux * 10);
     }
-}
-
-// Reset FPGA.  This clears all auxiliary command RAM banks, clears the USB FIFO, and resets the
-// per-channel sampling rate to 30.0 kS/s/ch.
-void Rhd2000EvalBoard::resetBoard() {}
-
-// Low-level FPGA reset.  Call when closing application to make sure everything has stopped.
-void Rhd2000EvalBoard::resetFpga()
-{
-    lock_guard<mutex> lockOk(okMutex);
-
-    // dev->ResetFPGA();
-    is_open = false;
 }
 
 // Set the FPGA to run continuously once started (if continuousMode == true) or to run until
@@ -726,19 +693,6 @@ void Rhd2000EvalBoard::setDacManual(int value)
     }
 
     dev->set_register_sync(WireInDacManual, value);
-}
-
-// Set the eight red LEDs on the Opal Kelly XEM6310 board according to integer array.
-void Rhd2000EvalBoard::setLedDisplay(int ledArray[])
-{
-    lock_guard<mutex> lockOk(okMutex);
-    int i, ledOut;
-
-    ledOut = 0;
-    for (i = 0; i < 8; ++i) {
-        if (ledArray[i] > 0) ledOut += 1 << i;
-    }
-    dev->set_register_sync(WireInLedDisplay, ledOut);
 }
 
 // Set the eight red LEDs on the front panel SPI ports according to integer array.
@@ -1011,25 +965,6 @@ void Rhd2000EvalBoard::setTtlMode(int mode)
     dev->set_register_sync(WireInResetRun, mode << 3, 0x0008);
 }
 
-// Is variable-frequency clock DCM programming done?
-bool Rhd2000EvalBoard::isDcmProgDone() const
-{
-    int value;
-
-    value = dev->get_register_sync(WireOutDataClkLocked).value();
-
-    return ((value & 0x0002) > 1);
-}
-
-// Is variable-frequency clock PLL locked?
-bool Rhd2000EvalBoard::isDataClockLocked() const
-{
-    int value;
-
-    value = dev->get_register_sync(WireOutDataClkLocked).value();
-
-    return ((value & 0x0001) > 0);
-}
 
 // Flush all remaining data out of the FIFO.  (This function should only be called when SPI
 // data acquisition has been stopped.)
@@ -1077,8 +1012,8 @@ std::expected<Rhd2000DataBlock, std::string> Rhd2000EvalBoard::run_and_read_samp
                                               sample_size * samples - buffer.size(), event.length),
                                       std::back_inserter(buffer));
                             if (buffer.size() == sample_size * samples) {
-                                result_promise->set_value(
-                                    Rhd2000DataBlock(numDataStreams, samples, buffer.data()));
+                                result_promise->set_value(Rhd2000DataBlock(
+                                    numDataStreams, samples, buffer.data(), has_device_timestamp));
                                 result_promise.reset();
                             }
                         } else {
@@ -1115,16 +1050,6 @@ int Rhd2000EvalBoard::getCableDelay(SPIPort port) const
     return cableDelay[static_cast<int>(port)];
 }
 
-// Return FPGA cable delays for all SPI ports.
-void Rhd2000EvalBoard::getCableDelay(std::vector<int> &delays) const
-{
-    if (delays.size() != MAX_NUM_SPI_PORTS) {
-        delays.resize(MAX_NUM_SPI_PORTS);
-    }
-    for (int i = 0; i < MAX_NUM_SPI_PORTS; ++i) {
-        delays[i] = cableDelay[i];
-    }
-}
 
 void Rhd2000EvalBoard::setAllDacsToZero()
 {

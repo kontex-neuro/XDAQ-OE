@@ -64,19 +64,11 @@ DeviceThread::DeviceThread(SourceNode *sn)
     : DataThread(sn),
       deviceFound(false),
       chipRegisters(30000.0f),
-      evalBoard(new Rhd2000EvalBoard),
       isTransmitting(false),
       impedanceThread(new ImpedanceMeter(this)),
       channelNamingScheme(GLOBAL_INDEX)
 {
     for (int i = 0; i < 8; i++) adcRangeSettings[i] = 0;
-
-    for (int i = 0; i < evalBoard->ports.max_chips; i++) {
-        headstages.emplace_back("Port " + std::to_string(evalBoard->ports.port_from_chip(i) + 1),
-                                fmt::format("P{}-{}", evalBoard->ports.port_from_chip(i) + 1,
-                                            i % evalBoard->ports.max_chips_per_port + 1),
-                                evalBoard->ports.max_streams_per_chip);
-    }
 
     sourceBuffers.add(new DataBuffer(2, 10000));  // start with 2 channels and automatically resize
 
@@ -92,6 +84,13 @@ DeviceThread::DeviceThread(SourceNode *sn)
     if (openBoard("")) {
         // upload bitfile and restore default settings
         initializeBoard();
+        for (int i = 0; i < evalBoard->ports.max_chips; i++) {
+            headstages.emplace_back(
+                "Port " + std::to_string(evalBoard->ports.port_from_chip(i) + 1),
+                fmt::format("P{}-{}", evalBoard->ports.port_from_chip(i) + 1,
+                            i % evalBoard->ports.max_chips_per_port + 1),
+                evalBoard->ports.max_streams_per_chip);
+        }
 
         // automatically find connected headstages
         scanPorts();  // things would appear to run more smoothly if this were done after the editor
@@ -247,8 +246,14 @@ bool DeviceThread::openBoard(String pathToLibrary)
     try {
         auto device_manager = xdaq::get_device_manager(selected_device.device_manager_path);
         auto dev = device_manager->create_device(selected_device.device_config.dump());
-        // TODO: update api
-        int return_code = evalBoard->open(std::move(dev));
+        auto has_device_timestamp =
+            selected_device.device_status.contains("Capabilities") &&
+            selected_device.device_status["Capabilities"].contains("Device Timestamp") &&
+            selected_device.device_status["Capabilities"]["Device Timestamp"].is_array();
+
+        evalBoard = std::make_unique<Rhd2000EvalBoard>(
+            std::move(dev), has_device_timestamp,
+            selected_device.device_status["Expander"].get<bool>());
     } catch (const std::exception &e) {
         AlertWindow::showMessageBox(AlertWindow::WarningIcon, "Error", e.what(), "OK");
         return false;
@@ -395,16 +400,14 @@ void DeviceThread::updateSettings(OwnedArray<ContinuousChannel> *continuousChann
     // create device
     // CODE GOES HERE
 
-    DataStream::Settings dataStreamSettings{
-        "Rhythm Data", "Continuous and event data from a device running Rhythm FPGA firmware",
+
+    DataStream *stream = new DataStream({
+        "Rhythm Data",
+        "Continuous and event data from a device running Rhythm FPGA firmware",
         "rhythm-fpga-device.data",
-
-        static_cast<float>(evalBoard->getSampleRate())
-
-    };
-
-    DataStream *stream = new DataStream(dataStreamSettings);
-
+        static_cast<float>(evalBoard->getSampleRate()),
+        use_xdaq_timestamp,
+    });
     sourceStreams->add(stream);
 
     int hsIndex = -1;
@@ -1001,7 +1004,8 @@ bool DeviceThread::startAcquisition()
     auto aligned_cb = xdaq::DataStream::aligned_read_stream(
         [output_buffer = std::vector<float>(current_aquisition_channels * 1), isddrstream,
          sample_size, streams = evalBoard->getNumEnabledDataStreams(),
-         aux_buffer = std::array<float, 32 * 3>(), this](auto &&event) mutable {
+         aux_buffer = std::array<float, 32 * 3>(), this,
+         use_xdaq_timestamp = this->use_xdaq_timestamp](auto &&event) mutable {
             std::visit(
                 [&](auto &&event) {
                     using T = std::decay_t<decltype(event)>;
@@ -1040,8 +1044,9 @@ bool DeviceThread::startAcquisition()
                                 }
                             }
 
-                            double _ts = 0;
                             juce::uint64 ttl = little2host32(&*io + 16);
+                            double _ts =
+                                use_xdaq_timestamp ? (little2host64(&*io - 8) / 1.0e6) : 0.0;
                             const int chunk_size = 1;
                             sourceBuffers[0]->addToBuffer(&output_buffer[0], &ts, &_ts, &ttl,
                                                           chunk_size);

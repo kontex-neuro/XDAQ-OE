@@ -63,6 +63,8 @@ std::vector<info> get_device_options()
                     .device_config = device_config,
                     .device_info = info_str.has_value() ? json::parse(info_str.value())
                                                         : json{{"Serial Number", "N/A"}},
+                    .device_status = status_str.has_value() ? json::parse(status_str.value())
+                                                            : json{{"Status", "N/A"}},
                 });
             }
         } catch (...) {
