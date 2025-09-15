@@ -15,7 +15,7 @@ std::size_t sample_size(int streams, int channels_per_stream, bool device_timest
 {
     // magic number 8 bytes; time stamp 4 bytes;
     // (amp channels + 3 aux commands) * size of amp
-    int sample_size = 8 + 8 + 4 + (streams * (channels_per_stream + 3) * sizeof(std::uint16_t));
+    int sample_size = 8 + 4 + (streams * (channels_per_stream + 3) * sizeof(std::uint16_t));
     // 0-3 filler words; ADCs 8 * 2 bytes; TTL in/out 16+16 bits or 32+32 bits
     sample_size += ((streams + 2) % 4) * 2 + 8 * device_timestamp + 16 + 8;
     return sample_size / sizeof(Unit);

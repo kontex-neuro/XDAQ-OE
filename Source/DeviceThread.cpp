@@ -251,6 +251,8 @@ bool DeviceThread::openBoard(String pathToLibrary)
             selected_device.device_status["Capabilities"].contains("Device Timestamp") &&
             selected_device.device_status["Capabilities"]["Device Timestamp"].is_array();
 
+        use_xdaq_timestamp = has_device_timestamp;
+
         evalBoard = std::make_unique<Rhd2000EvalBoard>(
             std::move(dev), has_device_timestamp,
             selected_device.device_status["Expander"].get<bool>());
@@ -999,6 +1001,7 @@ bool DeviceThread::startAcquisition()
 
     using namespace xdaq::DataStream;
     using namespace utils::endian;
+    fmt::print("222 Sample size: {}, {}\n", sample_size, use_xdaq_timestamp);
 
 
     auto aligned_cb = xdaq::DataStream::aligned_read_stream(
