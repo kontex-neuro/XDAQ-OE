@@ -49,7 +49,7 @@ class Rhd2000EvalBoard
 {
 public:
     using Device = typename xdaq::DeviceManager::OwnedDevice;
-    Ports ports = XDAQPortRHD();
+    const Ports ports = XDAQPortRHD();
     Rhd2000EvalBoard(Device dev, bool has_device_timestamp, bool has_expander);
     Rhd2000EvalBoard(const Rhd2000EvalBoard &) = delete;
     Rhd2000EvalBoard &operator=(const Rhd2000EvalBoard &) = delete;

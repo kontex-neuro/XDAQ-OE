@@ -109,11 +109,21 @@ DeviceThread::~DeviceThread() { LOGD("RHD2000 interface destroyed."); }
 
 void DeviceThread::initialize(bool signalChainIsLoading) {}
 
+struct NoDeviceConnectedEditor : GenericEditor {
+    NoDeviceConnectedEditor(GenericProcessor *parentNode) : GenericEditor(parentNode)
+    {
+        info = std::make_unique<Label>("info", "No XDAQ connected.");
+        info->setBounds(6, 30, 160, 20);
+        info->setFont(Font("Default", 18, Font::plain));
+        addAndMakeVisible(info.get());
+    }
+    std::unique_ptr<Label> info;
+};
+
 std::unique_ptr<GenericEditor> DeviceThread::createEditor(SourceNode *sn)
 {
-    std::unique_ptr<DeviceEditor> editor = std::make_unique<DeviceEditor>(sn, this);
-
-    return editor;
+    if (!evalBoard) return std::make_unique<NoDeviceConnectedEditor>(sn);
+    return std::make_unique<DeviceEditor>(sn, this);
 }
 
 void DeviceThread::handleBroadcastMessage(const String &msg, const int64 messageTimeMilliseconds)
@@ -227,7 +237,6 @@ Array<int> DeviceThread::getDACchannels() const
 
 bool DeviceThread::openBoard(String pathToLibrary)
 {
-    // TODO: handle no devices, adding refresh button
     // TODO: handle only one device, auto-select
     auto r = CoreServices::getDefaultUserSaveDirectory();
     auto device_options = get_device_options();
