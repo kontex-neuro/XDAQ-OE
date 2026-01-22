@@ -20,20 +20,25 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef THORVISIONTRIGGER_H_DEFINED
-#define THORVISIONTRIGGER_H_DEFINED
+#pragma once
+
+#ifndef THORVISION_H_DEFINED
+#define THORVISION_H_DEFINED
 
 #include <ProcessorHeaders.h>
 
+#include <memory>
 
-class ThorVisionTrigger : public GenericProcessor
+#include "ThorVisionHttpClient.h"
+
+class ThorVision : public GenericProcessor
 {
 public:
     /** The class constructor, used to initialize any members. */
-    ThorVisionTrigger(const std::string &ip = "127.0.0.1", const int port = 8001);
+    ThorVision(const std::string &ip = "127.0.0.1", const int port = 8001);
 
     /** The class destructor, used to deallocate memory */
-    ~ThorVisionTrigger();
+    ~ThorVision();
 
     /** If the processor has a custom editor, this method must be defined to instantiate it. */
     AudioProcessorEditor *createEditor() override;
@@ -83,8 +88,9 @@ public:
 private:
     const std::string _ip;
     const int _port;
+    std::unique_ptr<ThorVisionHttpClient> _http_client;
 
     void sendPutRequest(const String &endpoint, const String &body = "Open Ephys");
 };
 
-#endif
+#endif  // THORVISION_H_DEFINED

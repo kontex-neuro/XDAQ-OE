@@ -20,30 +20,32 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "ThorVisionTrigger.h"
+#include "ThorVision.h"
 
 #include <fmt/core.h>
 
-#include "ThorVisionTriggerEditor.h"
+#include "ThorVisionEditor.h"
 
 
-ThorVisionTrigger::ThorVisionTrigger(const std::string &ip, const int port)
-    : GenericProcessor("ThorVision Trigger"), _ip(ip), _port(port)
+ThorVision::ThorVision(const std::string &ip, const int port)
+    : GenericProcessor("ThorVision"), _ip(ip), _port(port)
 {
+    _http_client = std::make_unique<ThorVisionHttpClient>(_ip, _port);
+    _http_client->startThread();
 }
 
 
-ThorVisionTrigger::~ThorVisionTrigger() {}
+ThorVision::~ThorVision() { _http_client->stopThread(5000); }
 
 
-AudioProcessorEditor *ThorVisionTrigger::createEditor()
+AudioProcessorEditor *ThorVision::createEditor()
 {
-    editor = std::make_unique<ThorVisionTriggerEditor>(this);
+    editor = std::make_unique<ThorVisionEditor>(this);
     return editor.get();
 }
 
 
-void ThorVisionTrigger::registerParameters()
+void ThorVision::registerParameters()
 {
     // Register parameters here, if any
 
@@ -60,7 +62,7 @@ void ThorVisionTrigger::registerParameters()
 }
 
 
-void ThorVisionTrigger::updateSettings()
+void ThorVision::updateSettings()
 {
     // // create and add a TTL channel to the first data stream
     // EventChannel::Settings settings{EventChannel::Type::TTL, "TTL Event Generator Output",
@@ -72,46 +74,43 @@ void ThorVisionTrigger::updateSettings()
 }
 
 
-void ThorVisionTrigger::process(AudioBuffer<float> &buffer) { checkForEvents(); }
+void ThorVision::process(AudioBuffer<float> &buffer) { checkForEvents(); }
 
 
-void ThorVisionTrigger::handleTTLEvent(TTLEventPtr event) {}
+void ThorVision::handleTTLEvent(TTLEventPtr event) {}
 
 
-void ThorVisionTrigger::handleSpike(SpikePtr spike) {}
+void ThorVision::handleSpike(SpikePtr spike) {}
 
 
-void ThorVisionTrigger::handleBroadcastMessage(const String &msg,
-                                               const int64 messageTimeMilliseconds)
-{
-}
+void ThorVision::handleBroadcastMessage(const String &msg, const int64 messageTimeMilliseconds) {}
 
 
-void ThorVisionTrigger::saveCustomParametersToXml(XmlElement *parentElement) {}
+void ThorVision::saveCustomParametersToXml(XmlElement *parentElement) {}
 
 
-void ThorVisionTrigger::loadCustomParametersFromXml(XmlElement *parentElement) {}
+void ThorVision::loadCustomParametersFromXml(XmlElement *parentElement) {}
 
 
-void ThorVisionTrigger::startRecording()
+void ThorVision::startRecording()
 {
     const auto &endpoint = fmt::format("http://{}:{}/start", _ip, _port);
     sendPutRequest(endpoint);
 }
 
-void ThorVisionTrigger::stopRecording()
+void ThorVision::stopRecording()
 {
     const auto &endpoint = fmt::format("http://{}:{}/stop", _ip, _port);
     sendPutRequest(endpoint);
 }
 
-void ThorVisionTrigger::sendPutRequest(const String &endpoint, const String &body)
+void ThorVision::sendPutRequest(const String &endpoint, const String &body)
 {
     Thread::launch([endpoint, body] {
-        juce::URL request(endpoint);
-        fmt::println("ThorVisionTrigger::sendPutRequest {}", endpoint.toStdString());
+        URL request(endpoint);
+        fmt::println("ThorVision::sendPutRequest {}", endpoint.toStdString());
 
-        const auto &options = URL::InputStreamOptions(juce::URL::ParameterHandling::inPostData)
+        const auto &options = URL::InputStreamOptions(URL::ParameterHandling::inPostData)
                                   .withExtraHeaders("Content-Type: text/plain")
                                   .withConnectionTimeoutMs(2000)
                                   .withHttpRequestCmd("PUT");

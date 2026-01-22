@@ -20,32 +20,34 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef THORVISIONTRIGGEREDITOR_H_DEFINED
-#define THORVISIONTRIGGEREDITOR_H_DEFINED
+#pragma once
+
+#ifndef THORVISIONEDITOR_H_DEFINED
+#define THORVISIONEDITOR_H_DEFINED
 
 #include <EditorHeaders.h>
 
-class ThorVisionTrigger;
+class ThorVision;
 
-class ThorVisionTriggerEditor : public GenericEditor, public Button::Listener
+class ThorVisionEditor : public GenericEditor, public Button::Listener
 {
 public:
     /** Constructor */
-    ThorVisionTriggerEditor(GenericProcessor *parentNode);
+    ThorVisionEditor(GenericProcessor *parentNode);
 
     /** Destructor */
-    ~ThorVisionTriggerEditor() {}
+    ~ThorVisionEditor() {}
 
-    void buttonClicked (Button* button) override;
+    void buttonClicked(Button *button) override;
 
 private:
     // ScopedPointer<UtilityButton> thorvisionButton;
     // std::unique_ptr<UtilityButton> triggerButton;
 
-    ThorVisionTrigger *board;
+    ThorVision *board;
 
     /** Generates an assertion if this class leaks */
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ThorVisionTriggerEditor);
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ThorVisionEditor);
 };
 
-#endif  // THORVISIONTRIGGEREDITOR_H_DEFINED
+#endif  // THORVISIONEDITOR_H_DEFINED

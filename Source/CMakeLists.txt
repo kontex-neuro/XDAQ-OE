@@ -29,10 +29,11 @@ add_sources(${PLUGIN_NAME}
 	ImpedanceMeter.h
 	ImpedanceMeter.cpp
 	XDAQ.h
-	ThorVisionTriggerEditor.h
-	ThorVisionTriggerEditor.cpp
-	ThorVisionTrigger.h
-	ThorVisionTrigger.cpp
+	ThorVisionEditor.h
+	ThorVisionEditor.cpp
+	ThorVision.h
+	ThorVision.cpp
+	ThorVisionHttpClient.h
 )
 
 

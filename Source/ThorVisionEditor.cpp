@@ -20,16 +20,15 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "ThorVisionTriggerEditor.h"
+#include "ThorVisionEditor.h"
 
-#include "ThorVisionTrigger.h"
+#include "ThorVision.h"
 
-ThorVisionTriggerEditor::ThorVisionTriggerEditor(GenericProcessor *parentNode)
-    : GenericEditor(parentNode)
+ThorVisionEditor::ThorVisionEditor(GenericProcessor *parentNode) : GenericEditor(parentNode)
 {
     desiredWidth = 150;
 
-    board = (ThorVisionTrigger *) parentNode;
+    board = (ThorVision *) parentNode;
 
     // event frequency editor
     // addBoundedValueParameterEditor(Parameter::PROCESSOR_SCOPE,  // parameter scope
@@ -50,10 +49,10 @@ ThorVisionTriggerEditor::ThorVisionTriggerEditor(GenericProcessor *parentNode)
     // addAndMakeVisible(triggerButton.get());
 }
 
-void ThorVisionTriggerEditor::buttonClicked(Button *button)
+void ThorVisionEditor::buttonClicked(Button *button)
 {
     // if (button == triggerButton.get()) {
     //     fmt::println("ThorVision trigger button clicked");
-    //     ThorVisionTrigger *processor = (ThorVisionTrigger *) getProcessor();
+    //     ThorVision *processor = (ThorVision *) getProcessor();
     // }
 }
