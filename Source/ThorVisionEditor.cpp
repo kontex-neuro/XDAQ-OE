@@ -24,35 +24,73 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "ThorVision.h"
 
+AppStatusInterface::AppStatusInterface()
+{
+    _appStatusLabel = std::make_unique<Label>("App Status", "Disconnected");
+    _appStatusLabel->setBounds(-5, 25, 150, 20);
+    _appStatusLabel->setEditable(false, false, false);
+    _appStatusLabel->addListener(this);
+    _appStatusLabel->setTooltip("ThorVision app connection status: [Disconnected, Connected]");
+    addAndMakeVisible(_appStatusLabel.get());
+
+    _recordingStatusLabel = std::make_unique<Label>("Recording Status", "Unknown");
+    _recordingStatusLabel->setBounds(-5, 65, 150, 20);
+    _recordingStatusLabel->setEditable(false, false, false);
+    _recordingStatusLabel->addListener(this);
+    _recordingStatusLabel->setTooltip(
+        "Recording status of the ThorVision app: [Not Ready, Ready, Recording]");
+    addAndMakeVisible(_recordingStatusLabel.get());
+}
+
+void AppStatusInterface::setAppStatus(const String &status)
+{
+    _appStatusLabel->setText(status, dontSendNotification);
+}
+
+void AppStatusInterface::setRecordingStatus(const String &status)
+{
+    _recordingStatusLabel->setText(status, sendNotification);
+}
+
+void AppStatusInterface::paint(Graphics &g)
+{
+    g.setFont(Font("Small Text", 12, Font::plain));
+    g.setColour(findColour(ThemeColours::defaultText));
+    g.drawText("App Connection:", 0, 10, 150, 20, Justification::left, false);
+    g.drawText("Recording Status:", 0, 50, 150, 20, Justification::left, false);
+}
+
 ThorVisionEditor::ThorVisionEditor(GenericProcessor *parentNode) : GenericEditor(parentNode)
 {
     desiredWidth = 150;
 
-    board = (ThorVision *) parentNode;
+    _board = (ThorVision *) parentNode;
+    _board->addChangeListener(this);
 
-    // event frequency editor
-    // addBoundedValueParameterEditor(Parameter::PROCESSOR_SCOPE,  // parameter scope
-    //                                "interval",                  // parameter name
-    //                                15,                          // x pos
-    //                                35);                         // y pos
-
-    // const auto grid_col1 = 10;
-
-    // triggerButton = std::make_unique<UtilityButton>("Trigger");
-    // triggerButton->setRadius(3.0f);
-    // triggerButton->setBounds(55, 105, 80, 20);
-    // triggerButton->setFont(FontOptions(12.0f));
-    // triggerButton->addListener(this);
-    // triggerButton->setClickingTogglesState(true);
-    // triggerButton->setTooltip("Trigger record in ThorVision");
-    // triggerButton->setToggleState(true, dontSendNotification);
-    // addAndMakeVisible(triggerButton.get());
+    _appStatusInterface = std::make_unique<AppStatusInterface>();
+    addAndMakeVisible(_appStatusInterface.get());
+    _appStatusInterface->setBounds(10, 20, 150, 150);
 }
 
-void ThorVisionEditor::buttonClicked(Button *button)
+ThorVisionEditor::~ThorVisionEditor() { _board->removeChangeListener(this); }
+
+void ThorVisionEditor::changeListenerCallback(ChangeBroadcaster *)
 {
-    // if (button == triggerButton.get()) {
-    //     fmt::println("ThorVision trigger button clicked");
-    //     ThorVision *processor = (ThorVision *) getProcessor();
-    // }
+    _appStatusInterface->setAppStatus(_board->isConnected() ? "Connected" : "Disconnected");
+
+    switch (_board->getRecordingState()) {
+    case ThorVisionHttpClient::RecordingState::NotReady:
+        _appStatusInterface->setRecordingStatus("Not Ready");
+        break;
+    case ThorVisionHttpClient::RecordingState::Ready:
+        _appStatusInterface->setRecordingStatus("Ready");
+        break;
+    case ThorVisionHttpClient::RecordingState::Recording:
+        _appStatusInterface->setRecordingStatus("Recording");
+        break;
+    case ThorVisionHttpClient::RecordingState::Unknown:
+        _appStatusInterface->setRecordingStatus("Unknown");
+        break;
+    default: fmt::println("Unknown recording state"); break;
+    }
 }

@@ -28,14 +28,29 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
 ThorVision::ThorVision(const std::string &ip, const int port)
-    : GenericProcessor("ThorVision"), _ip(ip), _port(port)
+    : GenericProcessor("ThorVision"),
+      _ip(ip),
+      _port(port),
+      _lastConnected(false),
+      _lastRecordingState(ThorVisionHttpClient::RecordingState::NotReady)
 {
-    _http_client = std::make_unique<ThorVisionHttpClient>(_ip, _port);
-    _http_client->startThread();
+    _httpClient = std::make_unique<ThorVisionHttpClient>(_ip, _port);
+    _httpClient->onStatusChanged = [this](bool connected,
+                                          ThorVisionHttpClient::RecordingState recordingState) {
+        MessageManager::callAsync([this, connected, recordingState]() {
+            if (connected != _lastConnected || recordingState != _lastRecordingState) {
+                _lastConnected = connected;
+                _lastRecordingState = recordingState;
+
+                sendChangeMessage();
+            }
+        });
+    };
+    _httpClient->startThread();
 }
 
 
-ThorVision::~ThorVision() { _http_client->stopThread(5000); }
+ThorVision::~ThorVision() { _httpClient->stopThread(5000); }
 
 
 AudioProcessorEditor *ThorVision::createEditor()

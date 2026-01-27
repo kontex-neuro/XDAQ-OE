@@ -31,7 +31,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "ThorVisionHttpClient.h"
 
-class ThorVision : public GenericProcessor
+class ThorVision : public GenericProcessor, public ChangeBroadcaster
 {
 public:
     /** The class constructor, used to initialize any members. */
@@ -85,10 +85,16 @@ public:
 
     void stopRecording() override;
 
+    bool isConnected() const { return _httpClient->isConnected(); }
+
+    ThorVisionHttpClient::RecordingState getRecordingState() const { return _lastRecordingState; }
+
 private:
     const std::string _ip;
     const int _port;
-    std::unique_ptr<ThorVisionHttpClient> _http_client;
+    std::unique_ptr<ThorVisionHttpClient> _httpClient;
+    bool _lastConnected;
+    ThorVisionHttpClient::RecordingState _lastRecordingState;
 
     void sendPutRequest(const String &endpoint, const String &body = "Open Ephys");
 };

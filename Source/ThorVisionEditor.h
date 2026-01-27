@@ -29,22 +29,38 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 class ThorVision;
 
-class ThorVisionEditor : public GenericEditor, public Button::Listener
+class AppStatusInterface : public Component, public Label::Listener
+{
+public:
+    AppStatusInterface();
+
+    void paint(Graphics &g);
+    void labelTextChanged(Label *labelThatHasChanged) {};
+
+    void setAppStatus(const String &status);
+
+    void setRecordingStatus(const String &status);
+
+private:
+    std::unique_ptr<Label> _appStatusLabel;
+    std::unique_ptr<Label> _recordingStatusLabel;
+};
+
+class ThorVisionEditor : public GenericEditor, public ChangeListener
 {
 public:
     /** Constructor */
     ThorVisionEditor(GenericProcessor *parentNode);
 
     /** Destructor */
-    ~ThorVisionEditor() {}
+    ~ThorVisionEditor();
 
-    void buttonClicked(Button *button) override;
+    void changeListenerCallback(ChangeBroadcaster *) override;
 
 private:
-    // ScopedPointer<UtilityButton> thorvisionButton;
-    // std::unique_ptr<UtilityButton> triggerButton;
+    ThorVision *_board;
 
-    ThorVision *board;
+    std::unique_ptr<AppStatusInterface> _appStatusInterface;
 
     /** Generates an assertion if this class leaks */
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ThorVisionEditor);
