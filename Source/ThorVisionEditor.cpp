@@ -79,18 +79,10 @@ void ThorVisionEditor::changeListenerCallback(ChangeBroadcaster *)
     _appStatusInterface->setAppStatus(_board->isConnected() ? "Connected" : "Disconnected");
 
     switch (_board->getRecordingState()) {
-    case ThorVisionHttpClient::RecordingState::NotReady:
-        _appStatusInterface->setRecordingStatus("Not Ready");
-        break;
-    case ThorVisionHttpClient::RecordingState::Ready:
-        _appStatusInterface->setRecordingStatus("Ready");
-        break;
-    case ThorVisionHttpClient::RecordingState::Recording:
-        _appStatusInterface->setRecordingStatus("Recording");
-        break;
-    case ThorVisionHttpClient::RecordingState::Unknown:
-        _appStatusInterface->setRecordingStatus("Unknown");
-        break;
+    case RecordingState::NotReady: _appStatusInterface->setRecordingStatus("Not Ready"); break;
+    case RecordingState::Ready: _appStatusInterface->setRecordingStatus("Ready"); break;
+    case RecordingState::Recording: _appStatusInterface->setRecordingStatus("Recording"); break;
+    case RecordingState::Unknown: _appStatusInterface->setRecordingStatus("Unknown"); break;
     default: fmt::println("Unknown recording state"); break;
     }
 }

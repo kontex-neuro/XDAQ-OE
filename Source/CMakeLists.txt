@@ -33,7 +33,7 @@ add_sources(${PLUGIN_NAME}
 	ThorVisionEditor.cpp
 	ThorVision.h
 	ThorVision.cpp
-	ThorVisionHttpClient.h
+	# ThorVisionHttpClient.h
 )
 
 

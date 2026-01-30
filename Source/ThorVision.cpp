@@ -32,25 +32,22 @@ ThorVision::ThorVision(const std::string &ip, const int port)
       _ip(ip),
       _port(port),
       _lastConnected(false),
-      _lastRecordingState(ThorVisionHttpClient::RecordingState::NotReady)
+      _lastRecordingState(RecordingState::NotReady),
+      _httpClient(_ip, _port, [this](bool connected, RecordingState recordingState) {
+          MessageManager::callAsync([this, connected, recordingState] {
+              if (connected != _lastConnected || recordingState != _lastRecordingState) {
+                  _lastConnected = connected;
+                  _lastRecordingState = recordingState;
+                  sendChangeMessage();
+              }
+          });
+      })
 {
-    _httpClient = std::make_unique<ThorVisionHttpClient>(_ip, _port);
-    _httpClient->onStatusChanged = [this](bool connected,
-                                          ThorVisionHttpClient::RecordingState recordingState) {
-        MessageManager::callAsync([this, connected, recordingState]() {
-            if (connected != _lastConnected || recordingState != _lastRecordingState) {
-                _lastConnected = connected;
-                _lastRecordingState = recordingState;
-
-                sendChangeMessage();
-            }
-        });
-    };
-    _httpClient->startThread();
+    _httpClient.startThread();
 }
 
 
-ThorVision::~ThorVision() { _httpClient->stopThread(5000); }
+ThorVision::~ThorVision() { _httpClient.stopThread(5000); }
 
 
 AudioProcessorEditor *ThorVision::createEditor()
@@ -63,29 +60,12 @@ AudioProcessorEditor *ThorVision::createEditor()
 void ThorVision::registerParameters()
 {
     // Register parameters here, if any
-
-    // // Parameter for event frequency (Hz)
-    // addFloatParameter(Parameter::PROCESSOR_SCOPE,                           // parameter scope
-    //                   "interval",                                           // parameter name
-    //                   "Interval",                                           // display name
-    //                   "Interval for automated event generation (0 = off)",  // parameter
-    //                   description "ms",                                                 // unit
-    //                   1000.0f,                                              // default value
-    //                   0.0f,                                                 // minimum value
-    //                   5000.0f,                                              // maximum value
-    //                   50.0f);                                               // step size
 }
 
 
 void ThorVision::updateSettings()
 {
-    // // create and add a TTL channel to the first data stream
-    // EventChannel::Settings settings{EventChannel::Type::TTL, "TTL Event Generator Output",
-    //                                 "Default TTL event channel", "ttl.events", dataStreams[0]};
-
-    // ttlChannel = new EventChannel(settings);
-    // eventChannels.add(ttlChannel);   // this pointer is now owned by the eventChannels array
-    // ttlChannel->addProcessor(this);  // make sure the channel knows about this processor
+    // create and add a TTL channel to the first data stream
 }
 
 
