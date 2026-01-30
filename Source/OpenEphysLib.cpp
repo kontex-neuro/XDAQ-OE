@@ -25,6 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <string>
 
+#include "ThorVision.h"
 #include "XDAQ.h"
 
 #ifdef WIN32
@@ -35,7 +36,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #endif
 
 using namespace Plugin;
-#define NUM_PLUGINS 1
+#define NUM_PLUGINS 2
 
 
 extern "C" EXPORT void getLibInfo(Plugin::LibraryInfo *info)
@@ -56,6 +57,12 @@ extern "C" EXPORT int getPluginInfo(int index, Plugin::PluginInfo *info)
         info->type = Plugin::Type::DATA_THREAD;
         info->dataThread.name = "XDAQ";
         info->dataThread.creator = &createDataThread<RhythmNode::XDAQSystem>;
+        break;
+    case 1:
+        info->type = Plugin::Type::PROCESSOR;
+        info->processor.name = "ThorVision";
+        info->processor.type = Plugin::Processor::UTILITY;
+        info->processor.creator = &createProcessor<ThorVision>;
         break;
     default: return -1; break;
     }

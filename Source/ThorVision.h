@@ -1,0 +1,170 @@
+/*
+------------------------------------------------------------------
+
+This file is part of the Open Ephys GUI
+Copyright (C) 2022 Open Ephys
+
+------------------------------------------------------------------
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+#pragma once
+
+#ifndef THORVISION_H_DEFINED
+#define THORVISION_H_DEFINED
+
+#include <ProcessorHeaders.h>
+#include <fmt/core.h>
+
+#include <memory>
+
+enum class RecordingState { Unknown, NotReady, Ready, Recording };
+
+class ThorVisionHttpClient final : public juce::Thread
+{
+public:
+    explicit ThorVisionHttpClient(
+        const std::string &ip = "127.0.0.1", const int port = 8000,
+        std::function<void(bool, RecordingState)> onStatusChanged = nullptr)
+        : juce::Thread("HttpClient"), _ip(ip), _port(port), _onStatusChanged(onStatusChanged)
+    {
+    }
+
+    void run() override
+    {
+        while (!threadShouldExit()) {
+            pingHost();
+            wait(1000);
+        }
+    }
+
+private:
+    const std::string _ip;
+    const int _port;
+    std::function<void(bool, RecordingState)> _onStatusChanged;
+
+    void pingHost()
+    {
+        const auto &endpoint = fmt::format("http://{}:{}/status", _ip, _port);
+        URL request(endpoint);
+
+        const auto &body = "Open Ephys";
+        const auto &options = URL::InputStreamOptions(URL::ParameterHandling::inPostData)
+                                  .withExtraHeaders("Content-Type: text/plain")
+                                  .withConnectionTimeoutMs(1000)
+                                  .withHttpRequestCmd("PUT");
+
+        auto connected = false;
+        auto recordingState = RecordingState::Unknown;
+
+        if (auto stream = request.withPOSTData(body).createInputStream(options)) {
+            connected = true;
+
+            auto response = stream->readEntireStreamAsString();
+            const auto &json = juce::JSON::parse(response);
+
+            if (json.isVoid() || !json.isObject()) {
+                DBG("Invalid JSON response");
+                return;
+            }
+
+            const auto &obj = json.getDynamicObject();
+            const auto &status = obj->getProperty("Status").toString();
+
+            if (status.equalsIgnoreCase("Recording")) {
+                recordingState = RecordingState::Recording;
+            } else if (status.equalsIgnoreCase("Ready")) {
+                recordingState = RecordingState::Ready;
+            } else if (status.equalsIgnoreCase("Not Ready")) {
+                recordingState = RecordingState::NotReady;
+            } else {
+                DBG("Unknown Status: " + status);
+            }
+        }
+
+        if (_onStatusChanged) _onStatusChanged(connected, recordingState);
+    }
+};
+
+class ThorVision : public GenericProcessor, public ChangeBroadcaster
+{
+public:
+    /** The class constructor, used to initialize any members. */
+    ThorVision(const std::string &ip = "127.0.0.1", const int port = 8001);
+
+    /** The class destructor, used to deallocate memory */
+    ~ThorVision();
+
+    /** If the processor has a custom editor, this method must be defined to instantiate it. */
+    AudioProcessorEditor *createEditor() override;
+
+    /** All plugin parameter objects must be created inside this method */
+    void registerParameters() override;
+
+    /** Called every time the settings of an upstream plugin are changed.
+        Allows the processor to handle variations in the channel configuration or any other
+       parameter passed through signal chain. The processor can use this function to modify
+       channel objects that will be passed to downstream plugins. */
+    void updateSettings() override;
+
+    /** Defines the functionality of the processor.
+        The process method is called every time a new data buffer is available.
+        Visualizer plugins typically use this method to send data to the canvas for display
+       purposes
+     */
+    void process(AudioBuffer<float> &buffer) override;
+
+    /** Handles events received by the processor
+        Called automatically for each received event whenever checkForEvents() is called from
+        the plugin's process() method */
+    void handleTTLEvent(TTLEventPtr event) override;
+
+    /** Handles spikes received by the processor
+        Called automatically for each received spike whenever checkForEvents(true) is called
+       from the plugin's process() method */
+    void handleSpike(SpikePtr spike) override;
+
+    /** Handles broadcast messages sent during acquisition
+        Called automatically whenever a broadcast message is sent through the signal chain */
+    void handleBroadcastMessage(const String &message,
+                                const int64 messageTimeMilliseconds) override;
+
+    /** Saving custom settings to XML. This method is not needed to save the state of
+        Parameter objects */
+    void saveCustomParametersToXml(XmlElement *parentElement) override;
+
+    /** Load custom settings from XML. This method is not needed to load the state of
+        Parameter objects*/
+    void loadCustomParametersFromXml(XmlElement *parentElement) override;
+
+    void startRecording() override;
+
+    void stopRecording() override;
+
+    bool isConnected() const { return _lastConnected; }
+
+    RecordingState getRecordingState() const { return _lastRecordingState; }
+
+private:
+    const std::string _ip;
+    const int _port;
+    bool _lastConnected;
+    RecordingState _lastRecordingState;
+    ThorVisionHttpClient _httpClient;
+
+    void sendPutRequest(const String &endpoint, const String &body = "Open Ephys");
+};
+
+#endif  // THORVISION_H_DEFINED
