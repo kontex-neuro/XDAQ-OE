@@ -198,10 +198,7 @@ public:
     std::string serial_number;
     std::string xdaq_model_name;
 
-    void set_xdaq_timestamp(bool use_xdaq_timestamp)
-    {
-        this->use_xdaq_timestamp = use_xdaq_timestamp;
-    }
+    bool use_xdaq_timestamp = false;
 
 private:
     std::optional<std::unique_ptr<xdaq::DeviceManager::OwnedDevice::element_type::DataStream>>
@@ -315,7 +312,6 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DeviceThread);
 
-    bool use_xdaq_timestamp = false;
 };
 
 }  // namespace RhythmNode

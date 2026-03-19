@@ -163,7 +163,9 @@ Rhd2000EvalBoard::Rhd2000EvalBoard(Device dev, bool has_device_timestamp, bool h
 {
     cableDelay.resize(ports.num_of_spi);
     chips.resize(ports.max_chips);
-    if (has_device_timestamp) this->dev->set_register_sync(0x1530u, 1, 1);
+
+    // TODO: improve api to avoid hardcoding register addresses
+    if (has_device_timestamp) this->dev->set_register_sync(0x1544u, 1, 1);
 }
 
 Rhd2000EvalBoard::~Rhd2000EvalBoard()

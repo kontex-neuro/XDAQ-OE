@@ -186,14 +186,6 @@ DeviceEditor::DeviceEditor(GenericProcessor *parentNode, DeviceThread *board_)
     ttlSettleCombo->setSelectedId(1, sendNotification);
     addAndMakeVisible(ttlSettleCombo);
 
-    // add ADC channel enable/disable button
-    // use_xdaq_timestamp = new UtilityButton("Timestamp");
-    // use_xdaq_timestamp->setRadius(3.0f);
-    // use_xdaq_timestamp->setBounds(grid_col3, 108, 60, 18);
-    // use_xdaq_timestamp->addListener(this);
-    // use_xdaq_timestamp->setClickingTogglesState(true);
-    // use_xdaq_timestamp->setTooltip("Use XDAQ device timestamp instead of acquisition time");
-    // addAndMakeVisible(use_xdaq_timestamp);
 }
 
 
@@ -323,11 +315,6 @@ void DeviceEditor::buttonClicked(Button *button)
         LOGD("DSP offset ", button->getToggleState());
         board->setDSPOffset(button->getToggleState());
     }
-    // else if (button == use_xdaq_timestamp) {
-    //     board->set_xdaq_timestamp(use_xdaq_timestamp->getToggleState());
-    //     LOGD("XDAQ timestamp ", use_xdaq_timestamp->getToggleState());
-    //     CoreServices::updateSignalChain(this);
-    // }
 }
 
 void DeviceEditor::startAcquisition()

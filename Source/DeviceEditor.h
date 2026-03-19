@@ -101,7 +101,6 @@ private:
     ScopedPointer<UtilityButton> rescanButton, dacTTLButton;
     ScopedPointer<UtilityButton> auxButton;
     ScopedPointer<UtilityButton> adcButton;
-    ScopedPointer<UtilityButton> use_xdaq_timestamp;
 
     ScopedPointer<UtilityButton> dspoffsetButton;
     ScopedPointer<ComboBox> ttlSettleCombo, dacHPFcombo;

@@ -255,16 +255,36 @@ bool DeviceThread::openBoard(String pathToLibrary)
     try {
         auto device_manager = xdaq::get_device_manager(selected_device.device_manager_path);
         auto dev = device_manager->create_device(selected_device.device_config.dump());
-        auto has_device_timestamp =
-            selected_device.device_status.contains("Capabilities") &&
-            selected_device.device_status["Capabilities"].contains("Device Timestamp") &&
-            selected_device.device_status["Capabilities"]["Device Timestamp"].is_array();
+        auto status_str = dev->get_status();
+        if (!status_str.has_value()) {
+            AlertWindow::showMessageBox(AlertWindow::WarningIcon, "Error",
+                                        "Unable to get device status", "OK");
+            return false;
+        }
+        auto status = json::parse(status_str.value());
+        if (!status.contains("API")) {
+            AlertWindow::showMessageBox(AlertWindow::WarningIcon, "Error",
+                                        "Device status does not contain API information", "OK");
+            return false;
+        }
+        auto api = status["API"].get<std::string>();
+        auto target_api = "1";
+        if (api != target_api) {
+            AlertWindow::showMessageBox(
+                AlertWindow::WarningIcon, "Error",
+                fmt::format("Device API version {} does not match required API version {}, please "
+                            "update both firmware and software or reach kontex support.",
+                            api, target_api),
+                "OK");
+            return false;
+        }
 
-        use_xdaq_timestamp = has_device_timestamp;
+        use_xdaq_timestamp = status.contains("Capabilities") &&
+                             status["Capabilities"].contains("Device Timestamp") &&
+                             status["Capabilities"]["Device Timestamp"].is_array();
 
-        evalBoard = std::make_unique<Rhd2000EvalBoard>(
-            std::move(dev), has_device_timestamp,
-            selected_device.device_status["Expander"].get<bool>());
+        evalBoard = std::make_unique<Rhd2000EvalBoard>(std::move(dev), use_xdaq_timestamp,
+                                                       status["Expander"].get<bool>());
     } catch (const std::exception &e) {
         AlertWindow::showMessageBox(AlertWindow::WarningIcon, "Error", e.what(), "OK");
         return false;
