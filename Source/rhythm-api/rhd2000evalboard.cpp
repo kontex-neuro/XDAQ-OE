@@ -1034,7 +1034,7 @@ std::expected<Rhd2000DataBlock, std::string> Rhd2000EvalBoard::run_and_read_samp
     const auto expected_sample_time =
         std::chrono::milliseconds{(int) (1000 * samples * sample_size / getSampleRate())};
     auto wait_result = result.wait_for(expected_sample_time + 2s);
-    s->reset();
+    s = nullptr;
     while (isRunning()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
     flush();
 

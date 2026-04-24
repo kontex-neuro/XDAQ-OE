@@ -201,8 +201,7 @@ public:
     bool use_xdaq_timestamp = false;
 
 private:
-    std::optional<std::unique_ptr<xdaq::DeviceManager::OwnedDevice::element_type::DataStream>>
-        stream;
+    std::unique_ptr<xdaq::Device::DataStream> stream;
 
     std::queue<DigitalOutputCommand> digitalOutputCommands;
 
@@ -311,7 +310,6 @@ private:
     StringArray channelNames;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DeviceThread);
-
 };
 
 }  // namespace RhythmNode

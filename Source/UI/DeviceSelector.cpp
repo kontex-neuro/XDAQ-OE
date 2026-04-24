@@ -3,9 +3,9 @@
 #include <CoreServicesHeader.h>
 #include <fmt/format.h>
 #include <xdaq/device_manager.h>
+#include <xdaq/device_scanner.h>
 
 #include <filesystem>
-#include <unordered_set>
 
 
 
@@ -36,39 +36,21 @@ std::vector<info> get_device_options()
 
     std::vector<info> device_options;
 
-    std::unordered_set<fs::path> search_paths;
-    if (fs::exists(device_manager_dir))
-        for (auto path : fs::directory_iterator(device_manager_dir))
-            search_paths.insert(fs::canonical(path));
-    else
-        LOGE(fmt::format("Device manager directory not found: {}",
-                         device_manager_dir.generic_string()));
-
-    for (auto &path : search_paths) {
-        try {
-            auto device_manager = xdaq::get_device_manager(path);
-            LOGD(fmt::format("Found device manager: {}", path.generic_string()));
+    auto scan_results = xdaq::scan_devices_dir(device_manager_dir);
+    for (const auto &result : scan_results) {
+        if (auto *found = std::get_if<xdaq::DeviceFound>(&result)) {
+            auto device_manager = xdaq::get_device_manager(found->device_manager_path);
             auto device_manager_info = json::parse(device_manager->info());
-            for (auto &device_config : json::parse(device_manager->list_devices())) {
-                fmt::print("Device: {}\n", device_config.dump(4));
-                auto device = device_manager->create_device(device_config.dump());
-                const auto info_str = device->get_info();
-                fmt::print("Info: {}\n", info_str.value_or("N/A"));
-                const auto status_str = device->get_status();
-                fmt::print("Status: {}\n", status_str.value_or("N/A"));
-                device_config["mode"] = "rhd";
-                device_options.push_back({
-                    .device_manager_path = path.generic_string(),
-                    .display_name = device_manager_info["name"].get<std::string>(),
-                    .device_config = device_config,
-                    .device_info = info_str.has_value() ? json::parse(info_str.value())
-                                                        : json{{"Serial Number", "N/A"}},
-                    .device_status = status_str.has_value() ? json::parse(status_str.value())
-                                                            : json{{"Status", "N/A"}},
-                });
-            }
-        } catch (...) {
-            LOGD(fmt::format("Not a device manager: {}", path.generic_string()));
+            auto device_config = json::parse(found->device_config_json);
+            device_config["mode"] = "rhd";
+
+            device_options.push_back({
+                .device_manager_path = found->device_manager_path,
+                .display_name = device_manager_info["name"].get<std::string>(),
+                .device_config = device_config,
+                .device_info = json::parse(found->info_json),
+                .device_status = json::parse(found->status_json),
+            });
         }
     }
     return device_options;

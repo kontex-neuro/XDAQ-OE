@@ -1157,9 +1157,7 @@ bool DeviceThread::startAcquisition()
 
     evalBoard->run();
 
-    stream = {std::unique_ptr<xdaq::DeviceManager::OwnedDevice::element_type::DataStream>{
-        std::move(new_stream.value())}};
-
+    stream = std::move(new_stream);
 
     return true;
 }
