@@ -178,7 +178,6 @@ jobs:
                   rm XDAQ-OE.dll
                   7za a "../$WIN_ZIP" plugins/XDAQ-OE.dll
                   7za a "../$WIN_ZIP" shared/XDAQ-OE
-                  7za a "../$WIN_ZIP" shared/xdaq_device.dll
                   cd ../..
                   rm -rf dist/windows-repack
                   echo "Created: dist/$WIN_ZIP"

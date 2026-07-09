@@ -112,6 +112,14 @@ if(MSVC)
 	target_compile_definitions(${PLUGIN_NAME} PRIVATE NOMINMAX)
 	target_link_libraries(${PLUGIN_NAME} PRIVATE ${GUI_BASE_DIR}/Build/${CONFIGURATION_FOLDER}/open-ephys.lib)
 	target_compile_options(${PLUGIN_NAME} PRIVATE /sdl- /W0)
+
+	# Delay-load xdaq_device.dll from shared/<PLUGIN_NAME>/
+	target_compile_definitions(${PLUGIN_NAME} PRIVATE
+		"DELAY_LOAD_DLL_NAME=\"xdaq_device.dll\""
+		"DELAY_LOAD_RELATIVE_DIR=L\"../${SHARED_INSTALL_DIR}/${PLUGIN_NAME}\""
+	)
+	target_link_options(${PLUGIN_NAME} PRIVATE "/DELAYLOAD:xdaq_device.dll")
+	target_link_libraries(${PLUGIN_NAME} PRIVATE delayimp.lib)
 elseif(LINUX)
 	set_target_properties(${PLUGIN_NAME} PROPERTIES
 		CXX_VISIBILITY_PRESET hidden
@@ -158,7 +166,7 @@ install(TARGETS ${PLUGIN_NAME}
 )
 
 if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
-	xdaq_install_core(${SHARED_INSTALL_DIR} ${SHARED_INSTALL_DIR})
+	xdaq_install_core(${SHARED_INSTALL_DIR}/${PLUGIN_NAME} ${SHARED_INSTALL_DIR}/${PLUGIN_NAME})
 	xdaq_install_device_managers(${SHARED_INSTALL_DIR}/${PLUGIN_NAME}/managers)
 	set(CPACK_PACKAGE_NAME ${PLUGIN_NAME})
 	set(CPACK_PACKAGE_DIRECTORY ${CMAKE_BINARY_DIR}/package)
