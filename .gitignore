@@ -4,3 +4,5 @@
 /build*
 /activity.log
 /CMakeUserPresets.json
+
+.DS_Store
