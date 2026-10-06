@@ -25,6 +25,8 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
+
 #include "rhythm-api/rhd2000datablock.h"
 #include "rhythm-api/rhd2000evalboard.h"
 
@@ -230,13 +232,27 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
     struct streaminfo {
         int index;
         bool isddr;
+        int num_channels;  // 16 for RHD2216, 32 otherwise
     };
     std::vector<streaminfo> streaminfos;
     for (int i = 0; i < board->evalBoard->ports.max_streams; ++i) {
         if (!board->evalBoard->isStreamEnabled(i)) continue;
         bool ddr = board->evalBoard->ports.is_ddr(i);
-        streaminfos.push_back({i, ddr});
+        const auto &chip =
+            board->evalBoard->get_chips()[i / board->evalBoard->ports.max_streams_per_chip];
+        const int channels = IntanChip::num_channels_per_stream(chip.id);
+        streaminfos.push_back({i, ddr, channels > 0 ? channels : CHANNELS_PER_STREAM});
     }
+
+    // Sweep only channels present on some stream; 32-63 are the RHD2164 DDR half.
+    int max_channels = 0, max_ddr_channels = 0;
+    for (const auto &si : streaminfos) {
+        auto &target = si.isddr ? max_ddr_channels : max_channels;
+        target = std::max(target, si.num_channels);
+    }
+    std::vector<int> test_channels;
+    for (int c = 0; c < max_channels; ++c) test_channels.push_back(c);
+    for (int c = 0; c < max_ddr_channels; ++c) test_channels.push_back(CHANNELS_PER_STREAM + c);
 
     bool validImpedanceFreq;
     float actualImpedanceFreq = updateImpedanceFrequency(1000.0, validImpedanceFreq);
@@ -299,8 +315,8 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
     board->evalBoard->setContinuousRunMode(false);
     board->evalBoard->setMaxTimeStep(SAMPLES_PER_DATA_BLOCK * numBlocks);
 
-    // Create matrices of doubles of size (numStreams x 32 x 3) to store complex amplitudes
-    // of all amplifier channels (32 on each data stream) at three different Cseries values.
+    // Create matrices of doubles of size (numStreams x CHANNELS_PER_STREAM x 3) to store
+    // complex amplitudes of all amplifier channels at three different Cseries values.
     std::vector<std::vector<std::vector<double>>> measuredMagnitude;
     std::vector<std::vector<std::vector<double>>> measuredPhase;
 
@@ -333,8 +349,9 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
         case 2: board->chipRegisters.setZcheckScale(Rhd2000Registers::ZcheckCs10pF); break;
         }
 
-        // Check all 32 channels across all active data streams.
-        for (int channel = 0; channel < 64; ++channel) {
+        // Check all present channels across all active data streams.
+        for (int channel_index = 0; channel_index < (int) test_channels.size(); ++channel_index) {
+            const int channel = test_channels[channel_index];
             CHECK_EXIT;
 
             board->chipRegisters.setZcheckChannel(channel);
@@ -348,16 +365,18 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
                 return std::nullopt;
             }
 
-            setProgress(capRange / 3.0 + (channel / 64.0 / 3.0));
+            setProgress(capRange / 3.0 + (channel_index / (double) test_channels.size() / 3.0));
             for (int stream = 0; stream < res.value().num_streams; ++stream) {
-                if (streaminfos[stream].isddr != (channel >= 32)) continue;
+                const int stream_channel = channel % CHANNELS_PER_STREAM;
+                if (streaminfos[stream].isddr != (channel >= CHANNELS_PER_STREAM)) continue;
+                if (stream_channel >= streaminfos[stream].num_channels) continue;
                 const auto r = measureComplexAmplitude(
-                    {&res.value()
-                          .amp[(stream * 32 + (channel % 32)) * SAMPLES_PER_DATA_BLOCK * numBlocks],
+                    {&res.value().amp[(stream * CHANNELS_PER_STREAM + stream_channel) *
+                                      SAMPLES_PER_DATA_BLOCK * numBlocks],
                      static_cast<std::size_t>(SAMPLES_PER_DATA_BLOCK * numBlocks)},
                     numBlocks, board->settings.boardSampleRate, actualImpedanceFreq, numPeriods);
-                measuredMagnitude[stream][channel % 32][capRange] = std::abs(r);
-                measuredPhase[stream][channel % 32][capRange] = std::arg(r) * RADIANS_TO_DEGREES;
+                measuredMagnitude[stream][stream_channel][capRange] = std::abs(r);
+                measuredPhase[stream][stream_channel][capRange] = std::arg(r) * RADIANS_TO_DEGREES;
             }
         }
     }
@@ -376,7 +395,7 @@ std::optional<Impedances> ImpedanceMeter::runImpedanceMeasurement()
         impedances.stream_indices.push_back(streaminfos[stream].index);
         impedances.magnitudes_by_stream.push_back(std::vector<float>());
         impedances.phases_by_stream.push_back(std::vector<float>());
-        for (int channel = 0; channel < 32; ++channel) {
+        for (int channel = 0; channel < streaminfos[stream].num_channels; ++channel) {
             int bestAmplitudeIndex;
             double minDistance = 9.9e99;  // ridiculously large number
             for (int capRange = 0; capRange < 3; ++capRange) {

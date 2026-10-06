@@ -17,6 +17,23 @@ struct Chip {
 };
 
 /**
+ * @brief Real amplifier channels a chip puts on one datastream (0 for ChipID::NA).
+ *
+ * May be fewer than CHANNELS_PER_STREAM: an RHD2216 fills only 16 of the 32 words.
+ * An RHD2164 splits its 64 channels over two DDR streams.
+ */
+constexpr int num_channels_per_stream(ChipID id)
+{
+    switch (id) {
+    case ChipID::RHD2216: return 16;
+    case ChipID::RHD2132: return 32;
+    case ChipID::RHD2164: return 32;
+    case ChipID::RHS2116: return 16;
+    default: return 0;
+    }
+}
+
+/**
  * @brief This method is highly dependent on the commands uploaded to the RHD2000 chip.
  */
 template <typename T>

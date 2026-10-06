@@ -39,6 +39,7 @@
 #include <cassert>
 #include <chrono>
 #include <nlohmann/json.hpp>
+#include <numeric>
 #include <ranges>
 
 #include "DeviceEditor.h"
@@ -384,12 +385,15 @@ void DeviceThread::scanPorts()
         if (chip.id == IntanChip::ChipID::NA) {
             headstages[i].setNumStreams(0);
         } else {
+            // RHD2216 fills only 16 of the stream's CHANNELS_PER_STREAM words.
+            const int channels_per_stream = IntanChip::num_channels_per_stream(chip.id);
+            headstages[i].setChannelsPerStream(channels_per_stream);
             headstages[i].setNumStreams((chip.id == IntanChip::ChipID::RHD2164) ? 2 : 1);
             evalBoard->enableDataStream(i * evalBoard->ports.max_streams_per_chip, true);
-            channels_enabled += CHANNELS_PER_STREAM;
+            channels_enabled += channels_per_stream;
             if (chip.id == IntanChip::ChipID::RHD2164) {
                 evalBoard->enableDataStream(i * evalBoard->ports.max_streams_per_chip + 1, true);
-                channels_enabled += CHANNELS_PER_STREAM;
+                channels_enabled += channels_per_stream;
             }
         }
     }
@@ -1015,18 +1019,26 @@ bool DeviceThread::startAcquisition()
     const int chunk_size = expected_data_rate / hw_events_per_sec;
 
     std::vector<bool> isddrstream;
+    // Real amplifier channels per enabled stream; RHD2216 uses 16 of 32 words.
+    std::vector<int> stream_channels;
     int nonddr = 0;
     for (int i = 0; i < evalBoard->ports.max_streams; ++i) {
         if (!evalBoard->isStreamEnabled(i)) continue;
         bool ddr = evalBoard->ports.is_ddr(i);
         isddrstream.push_back(ddr);
         nonddr += !ddr;
+        const auto &chip = evalBoard->get_chips()[i / evalBoard->ports.max_streams_per_chip];
+        const int channels = IntanChip::num_channels_per_stream(chip.id);
+        // No detected chip: keep full width.
+        stream_channels.push_back(channels > 0 ? channels : CHANNELS_PER_STREAM);
     }
     isddrstream.push_back(false);
 
-    const int current_aquisition_channels =
-        (32 * evalBoard->getNumEnabledDataStreams() + nonddr * 3 * settings.acquireAux +
-         +settings.acquireAdc * evalBoard->ports.num_of_adc);
+    const int amplifier_channels =
+        std::accumulate(stream_channels.begin(), stream_channels.end(), 0);
+
+    const int current_aquisition_channels = (amplifier_channels + nonddr * 3 * settings.acquireAux +
+                                             settings.acquireAdc * evalBoard->ports.num_of_adc);
 
     using namespace xdaq::DataStream;
     using namespace utils::endian;
@@ -1035,7 +1047,7 @@ bool DeviceThread::startAcquisition()
 
     auto aligned_cb = xdaq::DataStream::aligned_read_stream(
         [output_buffer = std::vector<float>(current_aquisition_channels * 1), isddrstream,
-         sample_size, streams = evalBoard->getNumEnabledDataStreams(),
+         stream_channels, sample_size, streams = evalBoard->getNumEnabledDataStreams(),
          aux_buffer = std::array<float, 32 * 3>(), this,
          use_xdaq_timestamp = this->use_xdaq_timestamp](auto &&event) mutable {
             std::visit(
@@ -1056,7 +1068,8 @@ bool DeviceThread::startAcquisition()
                             auto target = output_buffer.begin();
                             const auto amp = data.begin() + 12;
                             for (int s = 0; s < streams; ++s) {
-                                for (int c = 3; c < 35; ++c) {
+                                // Amplifier words start at index 3, after the 3 aux words.
+                                for (int c = 3; c < 3 + stream_channels[s]; ++c) {
                                     *(target++) = IntanChip::amp2uV(
                                         little2host16(&*amp + (s + c * streams) * 2));
                                 }
