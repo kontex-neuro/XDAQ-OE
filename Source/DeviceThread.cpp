@@ -486,7 +486,7 @@ void DeviceThread::updateSettings(OwnedArray<ContinuousChannel> *continuousChann
                         stream};
 
                     continuousChannels->add(new ContinuousChannel(channelSettings));
-                    continuousChannels->getLast()->setUnits("mV");
+                    continuousChannels->getLast()->setUnits("V");
                 }
             }
         }
@@ -1075,10 +1075,19 @@ bool DeviceThread::startAcquisition()
                                 }
                                 if (!settings.acquireAux | (!isddrstream[s] && isddrstream[s + 1]))
                                     continue;
+                                // AuxIn1-3 all come from AuxCmd2 (aux word 1), one per frame
+                                // at ts % 4 == 1..3.
+                                // RHD2164 MISO B carries no aux results; read them from its
+                                // MISO A stream.
+                                // Subtract the 0-2.45 V ADC midpoint so int16 recording
+                                // doesn't clip.
+                                const int aux_s = isddrstream[s] ? s - 1 : s;
                                 for (int c = 0; c < 3; ++c) {
                                     if (((ts + 3) % 4) == c)
-                                        aux_buffer[s * 3 + c] = IntanChip::aux2V(
-                                            little2host16(&*amp + (s + c * streams) * 2));
+                                        aux_buffer[s * 3 + c] =
+                                            IntanChip::aux2V(
+                                                little2host16(&*amp + (aux_s + 1 * streams) * 2)) -
+                                            IntanChip::aux2V(32768);
                                     *(target++) = aux_buffer[s * 3 + c];
                                 }
                             }
